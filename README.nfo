@@ -1,0 +1,96 @@
+ ╔══════════════════════════════════════════════════════════════════╗
+ ║                                                                  ║
+ ║   SHAMPEH SCREENSHOT SCRAPER v1.0                                ║
+ ║                                                                  ║
+ ╠══════════════════════════════════════════════════════════════════╣
+
+    [ FLOW ]
+
+      1. paste tiktok channel URL
+      2. SCRAPE   → yt-dlp lists ALL videos w/ thumbnails
+      3. click cards to select
+      4. set DEDUPE slider (loose/medium/tight/strict)
+      5. HARVEST
+         phase 1 → downloads each video, extracts frames
+                   (ffmpeg mpdecimate, full-fps)
+         phase 2 → global cluster dedupe across ALL videos
+                   (every frame compared to every kept frame —
+                   duplicates from other videos get dropped too)
+      6. output flat into ./frames/[channel - DATETIME]/
+         filenames: NNNN_[videoid].jpg
+         (NNNN = global keep sequence in temporal/scene order)
+
+ ╠══════════════════════════════════════════════════════════════════╣
+
+    [ REQUIREMENTS ]
+
+      node.js            ✓ (you have it)
+      yt-dlp.exe         → must be on PATH or in project folder
+      ffmpeg.exe         → must be on PATH or in project folder
+
+      install check:
+        > yt-dlp --version
+        > ffmpeg -version
+
+      if missing:
+        > winget install yt-dlp.yt-dlp
+        > winget install Gyan.FFmpeg
+
+ ╠══════════════════════════════════════════════════════════════════╣
+
+    [ INSTALL ]
+
+      cd <folder>
+      npm install
+      (or just double-click start.bat)
+
+ ╠══════════════════════════════════════════════════════════════════╣
+
+    [ RUN ]
+
+      > start.bat
+          OR
+      > node server.js
+
+      opens on http://localhost:3847
+
+ ╠══════════════════════════════════════════════════════════════════╣
+
+    [ CONFIG ]
+
+      edit server.js header consts:
+
+        PORT              3847
+        OUTPUT_ROOT       ./frames   (next to server.js)
+        TMP_ROOT          ./_tmp     (next to server.js)
+        DEDUPE_THRESHOLD  10         (fallback if no slider val sent.
+                                      UI slider: 4=loose, 20=strict.
+                                      per-harvest override via UI.)
+
+ ╠══════════════════════════════════════════════════════════════════╣
+
+    [ OUTPUT ]
+
+      ./frames/   (next to server.js)
+        └── shampeh.ai - 2026-04-18_22-47-23 - thr12/
+            ├── 0001_7234567891234567890.jpg
+            ├── 0002_7234567891234567890.jpg
+            ├── 0003_7234567891234567899.jpg
+            └── ...
+            (all unique scenes from all selected videos, flat)
+            (NNNN = global keep sequence, videoid suffix = provenance)
+
+      math:  30s video @ 0.5s = 60 frames
+             40 videos selected ≈ 2400 frames
+
+ ╠══════════════════════════════════════════════════════════════════╣
+
+    [ FILES ]
+
+      server.js      express server, yt-dlp + ffmpeg orchestration
+      index.html     single-file UI, 40 themes, SSE progress overlay
+      package.json   express dep
+      start.bat      double-click launcher
+      config.json    auto-created: stores default theme
+
+ ╚══════════════════════════════════════════════════════════════════╝

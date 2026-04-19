@@ -1,0 +1,2861 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Shampeh Screenshot Scraper</title>
+<style>
+    /* ─────────────────── NFO palette ─────────────────── */
+    :root {
+        --bg:       #0a0a0a;
+        --panel:    #111;
+        --panel-2:  #161616;
+        --border:   #222;
+        --border-2: #2a2a2a;
+        --ink:      #c8c8c8;
+        --ink-dim:  #666;
+        --accent:   #00ff88;
+        --accent-2: #00cc6a;
+        --err:      #ff3b3b;
+        --warn:     #ffb000;
+        --sel:      #00ff88;
+        --mono:     'Consolas', 'Courier New', monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+        margin: 0; padding: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: var(--mono);
+        font-size: 13px;
+        line-height: 1.4;
+        position: relative;
+    }
+
+    /* wallpaper canvas sits behind everything */
+    #wallpaper {
+        position: fixed;
+        inset: 0;
+        z-index: -1;
+        pointer-events: none;
+    }
+    /* content layer gets a subtle panel so text stays readable over any wallpaper */
+    header, .row, #grid, #logWrap { position: relative; z-index: 1; }
+    a { color: var(--accent); }
+
+    /* ─────────────────── header ─────────────────── */
+    header {
+        padding: 10px 20px;
+        padding-right: 320px;
+        border-bottom: 1px solid var(--border);
+        background: linear-gradient(180deg, rgba(0,0,0,0.9), rgba(10,10,10,0.6));
+        overflow: hidden;
+    }
+    .ascii {
+        white-space: pre;
+        color: var(--accent);
+        font-size: 8px;
+        line-height: 1.05;
+        margin: 0;
+        text-shadow: 0 0 10px rgba(0,255,136,0.3);
+        font-weight: bold;
+    }
+    .tag { color: var(--ink-dim); font-size: 11px; }
+
+    /* ─────────────────── input row ─────────────────── */
+    .row {
+        display: flex;
+        gap: 8px;
+        padding: 14px 20px;
+        border-bottom: 1px solid var(--border);
+        flex-wrap: nowrap;
+        align-items: center;
+        background: rgba(0,0,0,0.4);
+    }
+    input[type=text] {
+        flex: 1 1 120px;
+        min-width: 120px;
+        background: var(--panel);
+        color: var(--ink);
+        border: 1px solid var(--border-2);
+        padding: 9px 12px;
+        font-family: var(--mono);
+        font-size: 13px;
+        outline: none;
+    }
+    input[type=text]:focus { border-color: var(--accent); }
+
+    button {
+        background: var(--panel-2);
+        color: var(--accent);
+        border: 1px solid var(--accent);
+        padding: 9px 14px;
+        font-family: var(--mono);
+        font-size: 12px;
+        font-weight: bold;
+        cursor: pointer;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+    button:hover:not(:disabled) { background: var(--accent); color: #000; }
+    button:disabled { opacity: .3; cursor: not-allowed; }
+    button.secondary { color: var(--ink); border-color: var(--border-2); }
+    button.secondary:hover:not(:disabled) { border-color: var(--ink); background: var(--panel); color: var(--ink); }
+
+    .stat { color: var(--ink-dim); font-size: 11px; margin-left: auto; white-space: nowrap; flex-shrink: 0; }
+    .stat b { color: var(--accent); }
+
+    /* ─────────────────── threshold / quality selects ─────────────────── */
+    .thr-wrap {
+        display: flex; align-items: center; gap: 6px;
+        padding: 3px 8px;
+        border: 1px solid var(--border-2);
+        background: rgba(0,0,0,0.3);
+        flex-shrink: 0;
+    }
+    .thr-wrap label {
+        font-size: 9px;
+        color: var(--ink-dim);
+        letter-spacing: 1px;
+    }
+    .thr-wrap select {
+        background: var(--panel);
+        color: var(--accent);
+        border: 1px solid var(--border-2);
+        font-family: var(--mono);
+        font-size: 11px;
+        padding: 2px 4px;
+        outline: none;
+        cursor: pointer;
+    }
+    .thr-wrap select:focus { border-color: var(--accent); }
+
+    /* ─────────────────── thumb grid ─────────────────── */
+    #grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+        gap: 10px;
+        padding: 16px 20px;
+    }
+    .card {
+        position: relative;
+        background: var(--panel);
+        border: 1px solid var(--border-2);
+        cursor: pointer;
+        overflow: hidden;
+        transition: border-color .1s, transform .1s;
+    }
+    .card:hover { border-color: var(--ink-dim); }
+    .card.selected { border-color: var(--sel); box-shadow: 0 0 0 1px var(--sel) inset; }
+    .card.selected::after {
+        content: '✓';
+        position: absolute; top: 6px; right: 6px;
+        background: var(--sel); color: #000;
+        width: 22px; height: 22px;
+        display: flex; align-items: center; justify-content: center;
+        font-weight: bold;
+        border-radius: 2px;
+    }
+    .card .thumb {
+        width: 100%;
+        aspect-ratio: 9/16;
+        background: #0a0a0f;
+        position: relative;
+        overflow: hidden;
+    }
+    .card .thumb img {
+        width: 100%; height: 100%;
+        object-fit: cover;
+        display: block;
+    }
+    .card .thumb .fail {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--ink-dim);
+        font-size: 10px;
+        text-align: center;
+        padding: 8px;
+        background: repeating-linear-gradient(45deg, #0a0a14, #0a0a14 6px, #101018 6px, #101018 12px);
+    }
+    .card .meta {
+        padding: 6px 8px;
+        border-top: 1px solid var(--border);
+        font-size: 11px;
+        color: var(--ink-dim);
+        display: flex;
+        justify-content: space-between;
+    }
+    .card .meta .dur { color: var(--accent); }
+
+    /* ─────────────────── log panel ─────────────────── */
+    #logWrap {
+        border-top: 1px solid var(--border);
+        background: rgba(5,5,5,0.85);
+    }
+    #logHead {
+        padding: 8px 20px;
+        font-size: 11px;
+        color: var(--ink-dim);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        gap: 16px;
+        align-items: center;
+    }
+    #logHead .bar {
+        flex: 1;
+        height: 4px;
+        background: var(--panel);
+        position: relative;
+        overflow: hidden;
+    }
+    #logHead .bar > div {
+        position: absolute; left: 0; top: 0; bottom: 0;
+        background: var(--accent);
+        width: 0%;
+        transition: width .2s;
+    }
+    #log {
+        font-size: 11px;
+        padding: 10px 20px;
+        max-height: 280px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+    }
+    #log .l-info { color: var(--ink); }
+    #log .l-step { color: var(--accent); }
+    #log .l-err  { color: var(--err); }
+    #log .l-done { color: var(--accent-2); font-weight: bold; }
+    #log .l-prog { color: var(--ink-dim); }
+    #log::-webkit-scrollbar { width: 8px; }
+    #log::-webkit-scrollbar-track { background: var(--bg); }
+    #log::-webkit-scrollbar-thumb { background: var(--border-2); }
+
+    .empty {
+        color: var(--ink-dim);
+        text-align: center;
+        padding: 40px 20px 60px;
+        grid-column: 1 / -1;
+    }
+    #idleArt {
+        font-family: var(--mono);
+        font-size: 13px;
+        line-height: 1.15;
+        color: var(--accent);
+        margin: 0 auto;
+        white-space: pre;
+        display: inline-block;
+        text-align: left;
+        letter-spacing: 0.5px;
+        text-shadow: 0 0 8px rgba(0,255,136,0.25);
+    }
+    #idlePrompt {
+        margin-top: 24px;
+        color: var(--ink-dim);
+        font-size: 12px;
+        letter-spacing: 4px;
+        text-transform: uppercase;
+    }
+    #idlePrompt::after {
+        content: '_';
+        animation: blink 1s steps(2) infinite;
+        color: var(--accent);
+        margin-left: 2px;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    /* scraping state: swap cursor for cycling dots, color-shift to accent */
+    #idlePrompt.scraping {
+        color: var(--accent);
+    }
+    #idlePrompt.scraping::after {
+        content: '';
+        animation: dots 1.2s steps(4) infinite;
+        margin-left: 2px;
+        letter-spacing: 4px;
+        color: var(--accent);
+    }
+    @keyframes dots {
+        0%   { content: ''; }
+        25%  { content: '.'; }
+        50%  { content: '..'; }
+        75%  { content: '...'; }
+        100% { content: '....'; }
+    }
+
+    /* ─────────────────── harvest overlay ─────────────────── */
+    #overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.85);
+        backdrop-filter: blur(4px);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 100;
+    }
+    #overlay.visible { display: flex; }
+
+    .modal {
+        background: var(--panel);
+        border: 1px solid var(--accent);
+        box-shadow: 0 0 60px rgba(0, 255, 136, 0.25), inset 0 0 0 1px rgba(0, 255, 136, 0.15);
+        width: 560px;
+        max-width: 92vw;
+        font-family: var(--mono);
+    }
+    .modal-head {
+        padding: 12px 18px;
+        border-bottom: 1px solid var(--border-2);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: linear-gradient(180deg, #1a1a1a, var(--panel));
+    }
+    .modal-head .title {
+        color: var(--accent);
+        font-size: 13px;
+        font-weight: bold;
+        letter-spacing: 2px;
+    }
+    .modal-head .close {
+        color: var(--ink-dim);
+        cursor: pointer;
+        font-size: 20px;
+        padding: 0 6px;
+        line-height: 1;
+        user-select: none;
+    }
+    .modal-head .close:hover { color: var(--err); }
+
+    .modal-body { padding: 20px 22px 16px; }
+
+    .ov-count {
+        font-size: 22px;
+        color: var(--accent);
+        font-weight: bold;
+        letter-spacing: 1px;
+    }
+    .ov-count .pct {
+        float: right;
+        color: var(--ink);
+        font-size: 16px;
+        font-weight: normal;
+    }
+
+    .ov-bar {
+        height: 10px;
+        background: #050505;
+        border: 1px solid var(--border-2);
+        margin: 10px 0 18px;
+        position: relative;
+        overflow: hidden;
+    }
+    .ov-bar > div {
+        position: absolute; inset: 0;
+        background: linear-gradient(90deg, var(--accent-2), var(--accent));
+        width: 0%;
+        transition: width .3s ease-out;
+        box-shadow: 0 0 12px rgba(0, 255, 136, 0.6);
+    }
+    .ov-bar > div::after {
+        content: '';
+        position: absolute; inset: 0;
+        background: repeating-linear-gradient(
+            45deg,
+            transparent 0, transparent 6px,
+            rgba(0,0,0,0.18) 6px, rgba(0,0,0,0.18) 12px
+        );
+        animation: stripe 1s linear infinite;
+    }
+    @keyframes stripe {
+        from { background-position: 0 0; }
+        to   { background-position: 24px 0; }
+    }
+
+    .ov-row {
+        display: flex;
+        justify-content: space-between;
+        font-size: 12px;
+        padding: 5px 0;
+        border-bottom: 1px dashed var(--border);
+    }
+    .ov-row:last-of-type { border-bottom: none; }
+    .ov-row .k { color: var(--ink-dim); }
+    .ov-row .v { color: var(--ink); }
+    .ov-row .v.accent { color: var(--accent); }
+
+    .ov-log {
+        margin-top: 14px;
+        padding: 8px 10px;
+        background: #050505;
+        border: 1px solid var(--border-2);
+        font-size: 11px;
+        height: 88px;
+        overflow-y: auto;
+        color: var(--ink-dim);
+    }
+    .ov-log div { padding: 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ov-log .ok  { color: var(--accent-2); }
+    .ov-log .err { color: var(--err); }
+
+    #overlay.complete .ov-bar > div::after { animation: none; opacity: 0; }
+    #overlay.failed .modal { border-color: var(--err); box-shadow: 0 0 40px rgba(255,59,59,0.3); }
+    #overlay.failed .modal-head .title { color: var(--err); }
+
+    /* ─────────────────── theme picker ─────────────────── */
+    #themeWrap {
+        position: fixed;
+        top: 10px; right: 14px;
+        z-index: 50;
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        background: rgba(0,0,0,0.75);
+        border: 1px solid var(--border-2);
+        padding: 4px 6px;
+    }
+    #themeWrap label {
+        font-size: 10px;
+        color: var(--ink-dim);
+        letter-spacing: 1px;
+    }
+    #themeSel {
+        background: var(--panel);
+        color: var(--accent);
+        border: 1px solid var(--border-2);
+        font-family: var(--mono);
+        font-size: 11px;
+        padding: 3px 6px;
+        outline: none;
+    }
+    #themeSel:focus { border-color: var(--accent); }
+    #saveDefaultBtn {
+        font-size: 10px;
+        padding: 4px 8px;
+        letter-spacing: 1px;
+    }
+    #saveDefaultBtn.saved { color: var(--ink-dim); border-color: var(--border-2); }
+
+    /* ─────────────────── harvest overlay ─────────────────── */
+    #overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.85);
+        backdrop-filter: blur(4px);
+        display: none;
+        align-items: stretch;
+        justify-content: center;
+        gap: 24px;
+        z-index: 100;
+        padding: 40px 20px;
+    }
+    #overlay.visible { display: flex; }
+
+    /* city panel — left side, matches modal height */
+    #cityPanel {
+        width: 560px;
+        max-width: 45vw;
+        min-height: 460px;
+        background: #000;
+        border: 1px solid var(--accent);
+        box-shadow: 0 0 40px rgba(0, 255, 136, 0.2);
+        position: relative;
+        overflow: hidden;
+        font-family: var(--mono);
+    }
+    #cityCanvas { display: block; width: 100%; height: 100%; }
+    #cityStage {
+        position: absolute;
+        top: 10px; left: 12px;
+        font-size: 10px;
+        color: var(--accent);
+        letter-spacing: 2px;
+        text-shadow: 0 0 6px rgba(0,255,136,0.6);
+        z-index: 2;
+        pointer-events: none;
+    }
+    #cityPct {
+        position: absolute;
+        bottom: 10px; right: 12px;
+        font-size: 32px;
+        font-weight: bold;
+        color: var(--accent);
+        text-shadow: 0 0 10px rgba(0,255,136,0.8);
+        z-index: 2;
+        pointer-events: none;
+        font-family: var(--mono);
+    }
+
+    .modal {
+        background: var(--panel);
+        border: 1px solid var(--accent);
+        box-shadow: 0 0 60px rgba(0, 255, 136, 0.25), inset 0 0 0 1px rgba(0, 255, 136, 0.15);
+        width: 480px;
+        max-width: 45vw;
+        padding: 0;
+        font-family: var(--mono);
+        display: flex;
+        flex-direction: column;
+        min-height: 460px;
+    }
+    .modal-body {
+        padding: 20px 22px 16px;
+        display: flex;
+        flex-direction: column;
+        flex: 1 1 auto;
+        min-height: 0;  /* allow children to shrink for scroll */
+    }
+    .modal-head {
+        padding: 12px 18px;
+        border-bottom: 1px solid var(--border-2);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: linear-gradient(180deg, #1a1a1a, var(--panel));
+    }
+    .modal-head .title {
+        color: var(--accent);
+        font-size: 13px;
+        font-weight: bold;
+        letter-spacing: 2px;
+    }
+    .modal-head .close {
+        color: var(--ink-dim);
+        cursor: pointer;
+        font-size: 18px;
+        padding: 0 6px;
+        line-height: 1;
+        user-select: none;
+    }
+    .modal-head .close:hover { color: var(--err); }
+
+    .modal-body { padding: 22px 22px 18px; }
+
+    .ov-count {
+        font-size: 22px;
+        color: var(--accent);
+        font-weight: bold;
+        margin-bottom: 4px;
+        letter-spacing: 1px;
+    }
+    .ov-count .pct {
+        float: right;
+        color: var(--ink);
+        font-size: 16px;
+        font-weight: normal;
+    }
+
+    .ov-bar {
+        height: 10px;
+        background: #050505;
+        border: 1px solid var(--border-2);
+        margin: 10px 0 18px;
+        position: relative;
+        overflow: hidden;
+    }
+    .ov-bar > div {
+        position: absolute; inset: 0;
+        background: linear-gradient(90deg, var(--accent-2), var(--accent));
+        width: 0%;
+        transition: width .3s ease-out;
+        box-shadow: 0 0 12px rgba(0, 255, 136, 0.6);
+    }
+    .ov-bar > div::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: repeating-linear-gradient(
+            45deg,
+            transparent 0, transparent 6px,
+            rgba(0,0,0,0.15) 6px, rgba(0,0,0,0.15) 12px
+        );
+        animation: stripe 1s linear infinite;
+    }
+    @keyframes stripe {
+        from { background-position: 0 0; }
+        to   { background-position: 24px 0; }
+    }
+
+    .ov-row {
+        display: flex;
+        justify-content: space-between;
+        font-size: 12px;
+        padding: 4px 0;
+        border-bottom: 1px dashed var(--border);
+    }
+    .ov-row:last-of-type { border-bottom: none; }
+    .ov-row .k { color: var(--ink-dim); }
+    .ov-row .v { color: var(--ink); font-family: var(--mono); }
+    .ov-row .v.accent { color: var(--accent); }
+
+    .ov-log {
+        margin-top: 14px;
+        padding: 8px 10px;
+        background: #050505;
+        border: 1px solid var(--border-2);
+        font-size: 11px;
+        height: 88px;
+        overflow-y: auto;
+        color: var(--ink-dim);
+    }
+    .ov-log div { padding: 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ov-log .ok  { color: var(--accent-2); }
+    .ov-log .err { color: var(--err); }
+
+    .ov-foot {
+        padding: 14px 18px 6px;
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        background: transparent;
+        border-top: none;
+    }
+    .ov-foot button {
+        box-shadow: 0 0 14px rgba(0,255,136,0.35), 0 4px 10px rgba(0,0,0,0.6);
+    }
+    .ov-foot button.secondary {
+        box-shadow: 0 0 10px rgba(255,255,255,0.08), 0 4px 10px rgba(0,0,0,0.6);
+    }
+
+    /* ─────────── unique scenes detected panel ─────────── */
+    .ov-unique-head {
+        margin-top: 14px;
+        padding-bottom: 6px;
+        border-bottom: 1px solid var(--border-2);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        color: var(--accent);
+        font-size: 11px;
+        letter-spacing: 1.5px;
+    }
+    .ov-unique-head .count { color: var(--ink-dim); font-size: 11px; }
+    .ov-unique-head .count b { color: var(--accent); font-size: 13px; }
+
+    .ov-unique-grid {
+        margin-top: 8px;
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(62px, 1fr));
+        gap: 4px;
+        flex: 1 1 auto;
+        min-height: 120px;
+        overflow-y: auto;
+        background: #050505;
+        border: 1px solid var(--border-2);
+        padding: 6px;
+        align-content: start;
+    }
+    .ov-unique-grid::-webkit-scrollbar { width: 6px; }
+    .ov-unique-grid::-webkit-scrollbar-track { background: #050505; }
+    .ov-unique-grid::-webkit-scrollbar-thumb { background: var(--border-2); }
+    .ov-unique-empty {
+        grid-column: 1 / -1;
+        color: var(--ink-dim);
+        font-size: 11px;
+        text-align: center;
+        padding: 14px 8px;
+        font-style: italic;
+    }
+    .ov-unique-grid img {
+        width: 100%;
+        aspect-ratio: 9/16;
+        object-fit: cover;
+        background: #0a0a0a;
+        border: 1px solid var(--border-2);
+        display: block;
+        animation: uPop 0.25s ease-out;
+    }
+    .ov-unique-grid img:hover { border-color: var(--accent); }
+    @keyframes uPop {
+        from { opacity: 0; transform: scale(0.85); }
+        to   { opacity: 1; transform: scale(1); }
+    }
+    #overlay.complete .modal { border-color: var(--accent); }
+    #overlay.complete .ov-bar > div::after { animation: none; }
+    #overlay.failed .modal { border-color: var(--err); box-shadow: 0 0 40px rgba(255,59,59,0.3); }
+    #overlay.failed .title { color: var(--err); }
+</style>
+</head>
+<body>
+
+<canvas id="wallpaper"></canvas>
+
+<div id="themeWrap">
+    <label>THEME</label>
+    <select id="themeSel"></select>
+    <button id="saveDefaultBtn" class="secondary">[ SAVE DEFAULT ]</button>
+</div>
+
+<header>
+<pre class="ascii"> ███████╗██╗  ██╗ █████╗ ███╗   ███╗██████╗ ███████╗██╗  ██╗
+ ██╔════╝██║  ██║██╔══██╗████╗ ████║██╔══██╗██╔════╝██║  ██║
+ ███████╗███████║███████║██╔████╔██║██████╔╝█████╗  ███████║
+ ╚════██║██╔══██║██╔══██║██║╚██╔╝██║██╔═══╝ ██╔══╝  ██╔══██║
+ ███████║██║  ██║██║  ██║██║ ╚═╝ ██║██║     ███████╗██║  ██║
+ ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝     ╚══════╝╚═╝  ╚═╝
+ ███████╗ ██████╗██████╗ ███████╗███████╗███╗   ██╗███████╗██╗  ██╗ ██████╗ ████████╗
+ ██╔════╝██╔════╝██╔══██╗██╔════╝██╔════╝████╗  ██║██╔════╝██║  ██║██╔═══██╗╚══██╔══╝
+ ███████╗██║     ██████╔╝█████╗  █████╗  ██╔██╗ ██║███████╗███████║██║   ██║   ██║
+ ╚════██║██║     ██╔══██╗██╔══╝  ██╔══╝  ██║╚██╗██║╚════██║██╔══██║██║   ██║   ██║
+ ███████║╚██████╗██║  ██║███████╗███████╗██║ ╚████║███████║██║  ██║╚██████╔╝   ██║
+ ╚══════╝ ╚═════╝╚═╝  ╚═╝╚══════╝╚══════╝╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝ ╚═════╝    ╚═╝
+ ███████╗ ██████╗██████╗  █████╗ ██████╗ ███████╗██████╗
+ ██╔════╝██╔════╝██╔══██╗██╔══██╗██╔══██╗██╔════╝██╔══██╗
+ ███████╗██║     ██████╔╝███████║██████╔╝█████╗  ██████╔╝
+ ╚════██║██║     ██╔══██╗██╔══██║██╔═══╝ ██╔══╝  ██╔══██╗
+ ███████║╚██████╗██║  ██║██║  ██║██║     ███████╗██║  ██║
+ ╚══════╝ ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚══════╝╚═╝  ╚═╝</pre>
+</header>
+
+<div class="row">
+    <input type="text" id="url" placeholder="https://www.tiktok.com/@username" autofocus />
+    <button id="scrapeBtn">[ SCRAPE ]</button>
+    <button id="selectAllBtn" class="secondary" disabled>Select All</button>
+    <button id="clearBtn" class="secondary" disabled>Clear</button>
+    <span class="stat"><b id="selCount">0</b> / <span id="totCount">0</span> selected</span>
+    <div class="thr-wrap">
+        <label>DEDUPE</label>
+        <select id="thrSel">
+            <option value="20" selected>20 — extreme</option>
+            <option value="19">19</option>
+            <option value="18">18 — strict</option>
+            <option value="17">17</option>
+            <option value="16">16 — very tight</option>
+            <option value="15">15</option>
+            <option value="14">14 — tighter</option>
+            <option value="13">13</option>
+            <option value="12">12 — tight</option>
+            <option value="11">11</option>
+            <option value="10">10 — medium</option>
+            <option value="9">9</option>
+            <option value="8">8</option>
+            <option value="7">7</option>
+            <option value="6">6 — loose</option>
+            <option value="5">5</option>
+            <option value="4">4 — very loose</option>
+            <option value="3">3</option>
+            <option value="2">2</option>
+            <option value="1">1 — keep all</option>
+        </select>
+    </div>
+    <div class="thr-wrap">
+        <label>QUALITY</label>
+        <select id="qSel">
+            <option value="png" selected>PNG (~2MB)</option>
+            <option value="q1">JPEG q1 (~500KB)</option>
+            <option value="q2">JPEG q2 (~200KB)</option>
+        </select>
+    </div>
+    <button id="harvestBtn" disabled>[ HARVEST ]</button>
+</div>
+
+<div id="grid">
+    <div class="empty" id="emptyState">
+        <pre id="idleArt"></pre>
+        <div id="idlePrompt">awaiting input</div>
+    </div>
+</div>
+
+<div id="logWrap">
+    <div id="logHead">
+        <span id="logStatus">idle</span>
+        <div class="bar"><div id="progBar"></div></div>
+        <span id="progText" style="color:var(--accent)">0 / 0</span>
+    </div>
+    <div id="log"></div>
+</div>
+
+<!-- ─────────── harvest overlay ─────────── -->
+<div id="overlay">
+    <div id="cityPanel">
+        <canvas id="cityCanvas"></canvas>
+        <div id="cityStage">EMPTY PLOT</div>
+        <div id="cityPct">0%</div>
+    </div>
+    <div class="modal">
+        <div class="modal-head">
+            <span class="title" id="ovTitle">▶ HARVESTING FRAMES</span>
+            <span class="close" id="ovClose" title="dismiss (job keeps running)">×</span>
+        </div>
+        <div class="modal-body">
+            <div class="ov-count">
+                <span id="ovDone">0</span> / <span id="ovTotal">0</span> videos
+                <span class="pct" id="ovPct">0%</span>
+            </div>
+            <div class="ov-bar"><div id="ovBar"></div></div>
+
+            <div class="ov-row"><span class="k">current</span><span class="v accent" id="ovCurrent">—</span></div>
+            <div class="ov-row"><span class="k">phase</span><span class="v" id="ovPhase">—</span></div>
+            <div class="ov-row"><span class="k">frames kept</span><span class="v" id="ovFrames">0</span></div>
+            <div class="ov-row"><span class="k">elapsed</span><span class="v" id="ovElapsed">0:00</span></div>
+            <div class="ov-row"><span class="k">eta</span><span class="v" id="ovEta">—</span></div>
+
+            <div class="ov-log" id="ovLog"></div>
+
+            <div class="ov-unique-head">
+                <span>▸ UNIQUE SCENES DETECTED</span>
+                <span class="count"><b id="ovUniqueCount">0</b></span>
+            </div>
+            <div class="ov-unique-grid" id="ovUniqueGrid">
+                <div class="ov-unique-empty">nothing yet — keepers appear during clustering</div>
+            </div>
+        </div>
+        <div class="ov-foot" id="ovFoot" style="display:none">
+            <button id="ovOpenFolderBtn" style="display:none">[ OPEN FOLDER ]</button>
+            <button id="ovDismissBtn" class="secondary" style="display:none">[ DISMISS ]</button>
+        </div>
+    </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+//   THEME SYSTEM :: 40 themes
+//   each theme = { name, group, bg, panel, accent, accent2, ink, wp }
+//     wp = null (no wallpaper) | 'static:<gradient>' | 'anim:<key>'
+// ═══════════════════════════════════════════════════════════════
+const THEMES = [
+    // ── static / CSS-only ───────────────────────────────
+    { id: 'matrix',     name: '◉ Matrix',          group: 'Classic',   accent: '#00ff88', accent2: '#00cc6a', bg: '#050a05', panel: '#0a140a', ink: '#c0ffc0', wp: 'anim:matrix' },
+    { id: 'warez',      name: '◉ Warez Amber',     group: 'Classic',   accent: '#ffb000', accent2: '#cc8800', bg: '#0a0600', panel: '#140a00', ink: '#f5d090', wp: 'static:warez' },
+    { id: 'cyber',      name: '◉ Cyber Cyan',      group: 'Classic',   accent: '#00e5ff', accent2: '#00a3cc', bg: '#02060a', panel: '#081018', ink: '#c0e8f5', wp: 'anim:grid' },
+    { id: 'bloodmoon',  name: '◉ Blood Moon',      group: 'Classic',   accent: '#ff2b2b', accent2: '#b01515', bg: '#0a0202', panel: '#140606', ink: '#f5c8c8', wp: 'anim:rain-blood' },
+    { id: 'vaporwave',  name: '◉ Vaporwave',       group: 'Classic',   accent: '#ff6ec7', accent2: '#a044c9', bg: '#10051a', panel: '#1a0a28', ink: '#ffd0f0', wp: 'anim:vapor' },
+    { id: 'neon80s',    name: '◉ Neon 80s',        group: 'Classic',   accent: '#ff0080', accent2: '#00ffff', bg: '#000010', panel: '#0a0020', ink: '#ff80ff', wp: 'anim:synthwave' },
+    { id: 'terminal',   name: '◉ Terminal',        group: 'Classic',   accent: '#33ff33', accent2: '#22cc22', bg: '#000000', panel: '#080808', ink: '#e0e0e0', wp: 'static:scanlines' },
+    { id: 'midnight',   name: '◉ Midnight',        group: 'Classic',   accent: '#6ba4ff', accent2: '#4478cc', bg: '#020410', panel: '#080c18', ink: '#c0d0f0', wp: null },
+    { id: 'hacker',     name: '◉ Hacker Green',    group: 'Classic',   accent: '#00ff41', accent2: '#00b028', bg: '#000800', panel: '#001400', ink: '#90ff90', wp: 'anim:matrix-dense' },
+    { id: 'ibm3270',    name: '◉ IBM 3270',        group: 'Classic',   accent: '#4fc3f7', accent2: '#2196a0', bg: '#001a1f', panel: '#002a30', ink: '#a0e0f0', wp: 'static:dots' },
+
+    // ── NFO / warez vibes ───────────────────────────────
+    { id: 'nfo-classic', name: '▓ NFO Classic',    group: 'NFO',       accent: '#ffcc00', accent2: '#cc9900', bg: '#0a0a00', panel: '#141400', ink: '#ffeeaa', wp: 'static:nfo-ansi' },
+    { id: 'nfo-toxic',   name: '▓ NFO Toxic',     group: 'NFO',       accent: '#aaff00', accent2: '#77bb00', bg: '#060a00', panel: '#0a1400', ink: '#ddffaa', wp: 'static:nfo-ansi' },
+    { id: 'nfo-razor',   name: '▓ NFO Razor 1911', group: 'NFO',      accent: '#ff3355', accent2: '#aa1133', bg: '#0a0205', panel: '#14040a', ink: '#ffaabb', wp: 'static:nfo-ansi' },
+    { id: 'nfo-fairlight', name: '▓ NFO Fairlight', group: 'NFO',    accent: '#66ffff', accent2: '#22aacc', bg: '#020a0a', panel: '#041414', ink: '#bbffff', wp: 'static:nfo-ansi' },
+    { id: 'nfo-skidrow', name: '▓ NFO SKIDROW',   group: 'NFO',       accent: '#ffffff', accent2: '#999999', bg: '#050505', panel: '#101010', ink: '#dddddd', wp: 'static:ascii-rain' },
+
+    // ── live animated wallpapers (shampeh.scrape.bot heritage) ─
+    { id: 'ocean',      name: '🌊 Live Ocean',     group: 'Live',      accent: '#00bfff', accent2: '#0088bb', bg: '#001a2a', panel: '#002a3f', ink: '#c0e8ff', wp: 'anim:ocean' },
+    { id: 'aurora',     name: '🌌 Live Aurora',    group: 'Live',      accent: '#a0ffcc', accent2: '#66aa99', bg: '#030812', panel: '#081220', ink: '#ddffee', wp: 'anim:aurora' },
+    { id: 'lava',       name: '🌋 Live Lava',      group: 'Live',      accent: '#ff6a00', accent2: '#cc3300', bg: '#120400', panel: '#1e0800', ink: '#ffd0a0', wp: 'anim:lava' },
+    { id: 'galaxy',     name: '🔭 Live Galaxy',    group: 'Live',      accent: '#c8b0ff', accent2: '#8866cc', bg: '#05031a', panel: '#0a0828', ink: '#e0d8ff', wp: 'anim:galaxy' },
+    { id: 'forest',     name: '🌲 Live Forest',    group: 'Live',      accent: '#88ff88', accent2: '#449944', bg: '#02100a', panel: '#041a12', ink: '#c8ffc8', wp: 'anim:fireflies' },
+    { id: 'rain',       name: '🌧 Live Rain',      group: 'Live',      accent: '#88bbff', accent2: '#5588cc', bg: '#020812', panel: '#06121e', ink: '#c0d0e8', wp: 'anim:rain' },
+    { id: 'snow',       name: '❄️ Live Snow',      group: 'Live',      accent: '#e0f0ff', accent2: '#a0bfe0', bg: '#030a14', panel: '#08141e', ink: '#eef4ff', wp: 'anim:snow' },
+    { id: 'embers',     name: '🔥 Live Embers',    group: 'Live',      accent: '#ff9933', accent2: '#cc6611', bg: '#0a0402', panel: '#140604', ink: '#ffd0a0', wp: 'anim:embers' },
+    { id: 'stars',      name: '⭐ Live Stars',     group: 'Live',      accent: '#ffee77', accent2: '#ccb033', bg: '#01020a', panel: '#040616', ink: '#f0e8c0', wp: 'anim:stars' },
+    { id: 'plasma',     name: '⚡ Live Plasma',    group: 'Live',      accent: '#ff33cc', accent2: '#bb1199', bg: '#0a0014', panel: '#14041e', ink: '#ffc0ee', wp: 'anim:plasma' },
+
+    // ── cyberpunk / scene ───────────────────────────────
+    { id: 'bladerunner', name: '▼ Bladerunner',    group: 'Cyberpunk', accent: '#ff8800', accent2: '#ff3377', bg: '#060210', panel: '#0c0420', ink: '#ffccaa', wp: 'anim:neon-drizzle' },
+    { id: 'tron',       name: '▼ Tron',            group: 'Cyberpunk', accent: '#00eaff', accent2: '#0099cc', bg: '#000a14', panel: '#001828', ink: '#bbf0ff', wp: 'anim:grid' },
+    { id: 'ghost',      name: '▼ Ghost in Shell',  group: 'Cyberpunk', accent: '#ff2277', accent2: '#cc1155', bg: '#050510', panel: '#0a0a1c', ink: '#ffb0d0', wp: 'anim:matrix-pink' },
+    { id: 'akira',      name: '▼ Akira',           group: 'Cyberpunk', accent: '#ff0033', accent2: '#aa0022', bg: '#0a0000', panel: '#140000', ink: '#ffaaaa', wp: 'anim:neon-drizzle' },
+    { id: 'shadowrun',  name: '▼ Shadowrun',       group: 'Cyberpunk', accent: '#77ff22', accent2: '#44aa11', bg: '#050a00', panel: '#0a1400', ink: '#c0ffa0', wp: 'anim:grid-green' },
+
+    // ── seasonal ────────────────────────────────────────
+    { id: 'halloween',  name: '🎃 Halloween',      group: 'Seasonal',  accent: '#ff7518', accent2: '#9933ff', bg: '#0a0304', panel: '#140608', ink: '#ffb080', wp: 'anim:rain-blood' },
+    { id: 'xmas-snow',  name: '🎄 Xmas Snow',      group: 'Seasonal',  accent: '#ff4444', accent2: '#44ff44', bg: '#020814', panel: '#041020', ink: '#ffcccc', wp: 'anim:snow' },
+    { id: 'xmas-cozy',  name: '🔥 Xmas Cozy',      group: 'Seasonal',  accent: '#ffaa33', accent2: '#cc6611', bg: '#0a0402', panel: '#140804', ink: '#ffdcaa', wp: 'anim:embers' },
+    { id: 'newyear',    name: '✨ New Year',       group: 'Seasonal',  accent: '#ffdd00', accent2: '#ccaa00', bg: '#080010', panel: '#100020', ink: '#fff0aa', wp: 'anim:stars' },
+
+    // ── chill / minimal ─────────────────────────────────
+    { id: 'paper',      name: '◌ Dark Paper',      group: 'Chill',     accent: '#d4a056', accent2: '#a07830', bg: '#121010', panel: '#1a1616', ink: '#d8cdbf', wp: 'static:paper' },
+    { id: 'solarized',  name: '◌ Solarized Dark',  group: 'Chill',     accent: '#b58900', accent2: '#cb4b16', bg: '#002b36', panel: '#073642', ink: '#93a1a1', wp: null },
+    { id: 'dracula',    name: '◌ Dracula',         group: 'Chill',     accent: '#bd93f9', accent2: '#ff79c6', bg: '#282a36', panel: '#343746', ink: '#f8f8f2', wp: null },
+    { id: 'nord',       name: '◌ Nord',            group: 'Chill',     accent: '#88c0d0', accent2: '#5e81ac', bg: '#2e3440', panel: '#3b4252', ink: '#e5e9f0', wp: null },
+    { id: 'gruvbox',    name: '◌ Gruvbox',         group: 'Chill',     accent: '#fabd2f', accent2: '#b8bb26', bg: '#1d2021', panel: '#282828', ink: '#ebdbb2', wp: null },
+    { id: 'monokai',    name: '◌ Monokai',         group: 'Chill',     accent: '#a6e22e', accent2: '#f92672', bg: '#1e1f1c', panel: '#272822', ink: '#f8f8f2', wp: null },
+];
+
+// ─────────── apply theme: CSS vars + wallpaper ───────────
+let wpAnimId = null;
+function applyTheme(id) {
+    const t = THEMES.find(x => x.id === id) || THEMES[0];
+    const r = document.documentElement.style;
+    r.setProperty('--bg',      t.bg);
+    r.setProperty('--panel',   t.panel);
+    r.setProperty('--panel-2', shade(t.panel, 6));
+    r.setProperty('--ink',     t.ink);
+    r.setProperty('--accent',  t.accent);
+    r.setProperty('--accent-2',t.accent2);
+    r.setProperty('--sel',     t.accent);
+    r.setProperty('--border',  shade(t.bg, 20));
+    r.setProperty('--border-2',shade(t.bg, 30));
+    document.getElementById('themeSel').value = id;
+    renderWallpaper(t);
+}
+
+function shade(hex, amt) {
+    // lighten a hex color by amt (0-255)
+    const n = parseInt(hex.replace('#',''), 16);
+    const r = Math.min(255, ((n >> 16) & 0xff) + amt);
+    const g = Math.min(255, ((n >> 8)  & 0xff) + amt);
+    const b = Math.min(255, (n & 0xff) + amt);
+    return '#' + ((r << 16) | (g << 8) | b).toString(16).padStart(6, '0');
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   WALLPAPER RENDERER
+// ═══════════════════════════════════════════════════════════════
+function renderWallpaper(theme) {
+    const cvs = document.getElementById('wallpaper');
+    const ctx = cvs.getContext('2d');
+    if (wpAnimId) { cancelAnimationFrame(wpAnimId); wpAnimId = null; }
+
+    function resize() {
+        cvs.width = innerWidth;
+        cvs.height = innerHeight;
+    }
+    resize();
+    window.onresize = resize;
+
+    if (!theme.wp) {
+        ctx.clearRect(0, 0, cvs.width, cvs.height);
+        return;
+    }
+
+    const [kind, key] = theme.wp.split(':');
+    if (kind === 'static') drawStatic(ctx, cvs, key, theme);
+    else if (kind === 'anim') startAnim(ctx, cvs, key, theme);
+}
+
+function drawStatic(ctx, cvs, key, t) {
+    const { width: W, height: H } = cvs;
+    ctx.clearRect(0, 0, W, H);
+    if (key === 'warez') {
+        const g = ctx.createRadialGradient(W/2, H/2, 0, W/2, H/2, Math.max(W,H)*0.7);
+        g.addColorStop(0, 'rgba(255,176,0,0.08)');
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+    } else if (key === 'scanlines') {
+        ctx.fillStyle = 'rgba(51,255,51,0.04)';
+        for (let y = 0; y < H; y += 3) ctx.fillRect(0, y, W, 1);
+    } else if (key === 'dots') {
+        ctx.fillStyle = 'rgba(79,195,247,0.08)';
+        for (let y = 0; y < H; y += 20) for (let x = 0; x < W; x += 20) {
+            ctx.fillRect(x, y, 1, 1);
+        }
+    } else if (key === 'nfo-ansi') {
+        // subtle tiled ░▒▓ texture
+        ctx.font = '14px ' + getComputedStyle(document.body).fontFamily;
+        ctx.fillStyle = t.accent; ctx.globalAlpha = 0.04;
+        const chars = '░▒▓█▌▐';
+        for (let y = 0; y < H; y += 16) for (let x = 0; x < W; x += 12) {
+            ctx.fillText(chars[Math.floor(Math.random() * chars.length)], x, y);
+        }
+        ctx.globalAlpha = 1;
+    } else if (key === 'ascii-rain') {
+        ctx.font = '12px ' + getComputedStyle(document.body).fontFamily;
+        ctx.fillStyle = t.accent; ctx.globalAlpha = 0.05;
+        const chars = '01|/-\\_`.:';
+        for (let y = 0; y < H; y += 14) for (let x = 0; x < W; x += 10) {
+            if (Math.random() < 0.3) ctx.fillText(chars[Math.floor(Math.random()*chars.length)], x, y);
+        }
+        ctx.globalAlpha = 1;
+    } else if (key === 'paper') {
+        ctx.fillStyle = 'rgba(212,160,86,0.02)';
+        for (let i = 0; i < 200; i++) ctx.fillRect(Math.random()*W, Math.random()*H, 1, 1);
+    }
+}
+
+function startAnim(ctx, cvs, key, t) {
+    const W = () => cvs.width, H = () => cvs.height;
+
+    // shared state bag
+    const state = {};
+
+    const draw = {
+        matrix:       () => drawMatrix(ctx, cvs, t, false, state),
+        'matrix-dense': () => drawMatrix(ctx, cvs, t, true, state),
+        'matrix-pink': () => drawMatrix(ctx, cvs, { ...t, accent: '#ff4499' }, false, state),
+        rain:         () => drawRain(ctx, cvs, t, '|', 0.08, state),
+        'rain-blood': () => drawRain(ctx, cvs, { ...t, accent: '#ff3333' }, '!|', 0.09, state),
+        snow:         () => drawSnow(ctx, cvs, t, state),
+        embers:       () => drawEmbers(ctx, cvs, t, state),
+        stars:        () => drawStars(ctx, cvs, t, state),
+        ocean:        () => drawOcean(ctx, cvs, t, state),
+        aurora:       () => drawAurora(ctx, cvs, t, state),
+        lava:         () => drawLava(ctx, cvs, t, state),
+        galaxy:       () => drawGalaxy(ctx, cvs, t, state),
+        fireflies:    () => drawFireflies(ctx, cvs, t, state),
+        plasma:       () => drawPlasma(ctx, cvs, t, state),
+        grid:         () => drawGrid(ctx, cvs, t, state),
+        'grid-green': () => drawGrid(ctx, cvs, { ...t, accent: '#22ff22' }, state),
+        synthwave:    () => drawSynthwave(ctx, cvs, t, state),
+        vapor:        () => drawVapor(ctx, cvs, t, state),
+        'neon-drizzle': () => drawRain(ctx, cvs, t, '/|\\', 0.06, state),
+    }[key];
+
+    if (!draw) return;
+    function loop() { draw(); wpAnimId = requestAnimationFrame(loop); }
+    loop();
+}
+
+// ── matrix / rain ────────────────────────────────────────
+function drawMatrix(ctx, cvs, t, dense, s) {
+    const W = cvs.width, H = cvs.height;
+    if (!s.drops) {
+        s.cols = Math.floor(W / (dense ? 14 : 20));
+        s.drops = Array.from({length: s.cols}, () => Math.random() * H);
+    }
+    ctx.fillStyle = 'rgba(0,0,0,0.05)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = t.accent;
+    ctx.font = (dense ? '12px ' : '14px ') + 'monospace';
+    ctx.globalAlpha = 0.55;
+    const chars = '01アイウエオカキクケコｱｲｳｴｵ';
+    const step = dense ? 14 : 20;
+    s.drops.forEach((y, i) => {
+        const ch = chars[Math.floor(Math.random() * chars.length)];
+        ctx.fillText(ch, i * step, y);
+        if (y > H && Math.random() > 0.975) s.drops[i] = 0;
+        s.drops[i] += dense ? 16 : 14;
+    });
+    ctx.globalAlpha = 1;
+}
+
+function drawRain(ctx, cvs, t, chars, speed, s) {
+    const W = cvs.width, H = cvs.height;
+    if (!s.drops) {
+        s.cols = Math.floor(W / 14);
+        s.drops = Array.from({length: s.cols}, () => ({ y: Math.random()*H, sp: 8 + Math.random()*14 }));
+    }
+    ctx.fillStyle = 'rgba(0,0,0,0.08)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = t.accent;
+    ctx.font = '14px monospace';
+    ctx.globalAlpha = 0.4;
+    s.drops.forEach((d, i) => {
+        const ch = chars[Math.floor(Math.random()*chars.length)];
+        ctx.fillText(ch, i * 14, d.y);
+        d.y += d.sp;
+        if (d.y > H) { d.y = -10; d.sp = 8 + Math.random()*14; }
+    });
+    ctx.globalAlpha = 1;
+}
+
+// ── snow ─────────────────────────────────────────────────
+function drawSnow(ctx, cvs, t, s) {
+    const W = cvs.width, H = cvs.height;
+    if (!s.flakes) {
+        s.flakes = Array.from({length: 120}, () => ({
+            x: Math.random()*W, y: Math.random()*H,
+            r: 0.8 + Math.random()*1.8,
+            sp: 0.4 + Math.random()*1.6,
+            drift: (Math.random()-0.5) * 0.6,
+            op: 0.3 + Math.random()*0.5,
+        }));
+    }
+    ctx.fillStyle = t.bg;
+    ctx.globalAlpha = 0.3;
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalAlpha = 1;
+    s.flakes.forEach(f => {
+        ctx.beginPath();
+        ctx.arc(f.x, f.y, f.r, 0, Math.PI*2);
+        ctx.fillStyle = t.ink;
+        ctx.globalAlpha = f.op;
+        ctx.fill();
+        f.y += f.sp; f.x += f.drift;
+        if (f.y > H + 5) { f.y = -5; f.x = Math.random()*W; }
+    });
+    ctx.globalAlpha = 1;
+}
+
+// ── embers (rising sparks) ───────────────────────────────
+function drawEmbers(ctx, cvs, t, s) {
+    const W = cvs.width, H = cvs.height;
+    if (!s.sparks) s.sparks = [];
+    ctx.fillStyle = 'rgba(0,0,0,0.1)';
+    ctx.fillRect(0, 0, W, H);
+    if (Math.random() < 0.6 && s.sparks.length < 120) {
+        s.sparks.push({
+            x: Math.random()*W, y: H + 5,
+            vx: (Math.random()-0.5)*0.6,
+            vy: -0.6 - Math.random()*1.4,
+            r: 0.8 + Math.random()*1.6,
+            life: 1,
+        });
+    }
+    for (let i = s.sparks.length - 1; i >= 0; i--) {
+        const e = s.sparks[i];
+        e.x += e.vx + (Math.random()-0.5)*0.2;
+        e.y += e.vy; e.life -= 0.006;
+        if (e.life <= 0) { s.sparks.splice(i, 1); continue; }
+        ctx.beginPath();
+        ctx.arc(e.x, e.y, e.r * e.life, 0, Math.PI*2);
+        ctx.fillStyle = t.accent;
+        ctx.globalAlpha = e.life * 0.7;
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+}
+
+// ── stars (twinkling) ────────────────────────────────────
+function drawStars(ctx, cvs, t, s) {
+    const W = cvs.width, H = cvs.height;
+    if (!s.stars) {
+        s.stars = Array.from({length: 200}, () => ({
+            x: Math.random()*W, y: Math.random()*H,
+            r: Math.random()*1.4,
+            phase: Math.random() * Math.PI * 2,
+            sp: 0.01 + Math.random()*0.03,
+        }));
+    }
+    ctx.fillStyle = t.bg;
+    ctx.fillRect(0, 0, W, H);
+    s.stars.forEach(star => {
+        star.phase += star.sp;
+        const a = 0.4 + Math.sin(star.phase) * 0.4;
+        ctx.beginPath();
+        ctx.arc(star.x, star.y, star.r, 0, Math.PI*2);
+        ctx.fillStyle = t.accent;
+        ctx.globalAlpha = a;
+        ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+}
+
+// ── ocean (layered sine waves + shimmer) ─────────────────
+function drawOcean(ctx, cvs, t, s) {
+    const W = cvs.width, H = cvs.height;
+    if (!s.phase) s.phase = 0;
+    s.phase += 0.01;
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, t.bg);
+    g.addColorStop(1, t.panel);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+    // wave layers
+    for (let layer = 0; layer < 4; layer++) {
+        ctx.beginPath();
+        const amp = 20 + layer * 10;
+        const yBase = H * 0.45 + layer * 30;
+        ctx.moveTo(0, H);
+        for (let x = 0; x <= W; x += 6) {
+            const y = yBase + Math.sin((x * 0.008) + s.phase + layer) * amp
+                    + Math.sin((x * 0.02) - s.phase * 1.5 + layer) * (amp * 0.4);
+            ctx.lineTo(x, y);
+        }
+        ctx.lineTo(W, H); ctx.closePath();
+        ctx.fillStyle = t.accent;
+        ctx.globalAlpha = 0.08 + layer * 0.05;
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+}
+
+// ── aurora ───────────────────────────────────────────────
+function drawAurora(ctx, cvs, t, s) {
+    const W = cvs.width, H = cvs.height;
+    if (!s.p) s.p = 0;
+    s.p += 0.005;
+    ctx.fillStyle = 'rgba(3,8,18,0.2)';
+    ctx.fillRect(0, 0, W, H);
+    for (let band = 0; band < 3; band++) {
+        ctx.beginPath();
+        const yBase = H * 0.2 + band * 40;
+        ctx.moveTo(0, yBase);
+        for (let x = 0; x <= W; x += 10) {
+            const y = yBase + Math.sin((x * 0.003) + s.p * (1 + band*0.3)) * 40
+                    + Math.sin((x * 0.01) + s.p * 2) * 15;
+            ctx.lineTo(x, y);
+        }
+        const grad = ctx.createLinearGradient(0, yBase - 50, 0, yBase + 50);
+        grad.addColorStop(0, 'transparent');
+        grad.addColorStop(0.5, t.accent);
+        grad.addColorStop(1, 'transparent');
+        ctx.strokeStyle = grad;
+        ctx.lineWidth = 60;
+        ctx.globalAlpha = 0.15;
+        ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+}
+
+// ── lava (drifting blobs) ────────────────────────────────
+function drawLava(ctx, cvs, t, s) {
+    const W = cvs.width, H = cvs.height;
+    if (!s.blobs) {
+        s.blobs = Array.from({length: 6}, () => ({
+            x: Math.random()*W, y: Math.random()*H,
+            r: 80 + Math.random()*100,
+            vx: (Math.random()-0.5)*0.4,
+            vy: (Math.random()-0.5)*0.3,
+        }));
+    }
+    ctx.fillStyle = t.bg;
+    ctx.fillRect(0, 0, W, H);
+    s.blobs.forEach(b => {
+        b.x += b.vx; b.y += b.vy;
+        if (b.x < -b.r || b.x > W + b.r) b.vx *= -1;
+        if (b.y < -b.r || b.y > H + b.r) b.vy *= -1;
+        const g = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, b.r);
+        g.addColorStop(0, t.accent);
+        g.addColorStop(0.4, t.accent2);
+        g.addColorStop(1, 'transparent');
+        ctx.fillStyle = g;
+        ctx.globalAlpha = 0.35;
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.r, 0, Math.PI*2);
+        ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+}
+
+// ── galaxy (stars + nebula + shooting) ───────────────────
+function drawGalaxy(ctx, cvs, t, s) {
+    const W = cvs.width, H = cvs.height;
+    if (!s.stars) {
+        s.stars = Array.from({length: 300}, () => ({
+            x: Math.random()*W, y: Math.random()*H,
+            r: Math.random()*1.2,
+            phase: Math.random()*Math.PI*2, sp: 0.02 + Math.random()*0.04,
+        }));
+        s.shoot = null;
+    }
+    ctx.fillStyle = 'rgba(5,3,26,0.3)';
+    ctx.fillRect(0, 0, W, H);
+    // nebula
+    const g = ctx.createRadialGradient(W*0.3, H*0.4, 0, W*0.3, H*0.4, W*0.5);
+    g.addColorStop(0, t.accent2); g.addColorStop(1, 'transparent');
+    ctx.fillStyle = g; ctx.globalAlpha = 0.12; ctx.fillRect(0,0,W,H);
+    ctx.globalAlpha = 1;
+    s.stars.forEach(st => {
+        st.phase += st.sp;
+        ctx.beginPath();
+        ctx.arc(st.x, st.y, st.r, 0, Math.PI*2);
+        ctx.fillStyle = t.ink;
+        ctx.globalAlpha = 0.3 + Math.sin(st.phase) * 0.5;
+        ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    // shooting stars
+    if (!s.shoot && Math.random() < 0.003) {
+        s.shoot = { x: Math.random()*W, y: Math.random()*H*0.5, vx: 8+Math.random()*8, vy: 3, life: 1 };
+    }
+    if (s.shoot) {
+        const sh = s.shoot;
+        ctx.strokeStyle = t.accent;
+        ctx.globalAlpha = sh.life;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(sh.x, sh.y); ctx.lineTo(sh.x - sh.vx*6, sh.y - sh.vy*6); ctx.stroke();
+        sh.x += sh.vx; sh.y += sh.vy; sh.life -= 0.02;
+        if (sh.life <= 0 || sh.x > W) s.shoot = null;
+        ctx.globalAlpha = 1;
+    }
+}
+
+// ── fireflies (rising glowing dots) ──────────────────────
+function drawFireflies(ctx, cvs, t, s) {
+    const W = cvs.width, H = cvs.height;
+    if (!s.flies) {
+        s.flies = Array.from({length: 60}, () => ({
+            x: Math.random()*W, y: Math.random()*H,
+            r: 1 + Math.random()*2,
+            vx: (Math.random()-0.5)*0.3,
+            vy: -0.2 - Math.random()*0.4,
+            phase: Math.random()*Math.PI*2, sp: 0.03 + Math.random()*0.05,
+        }));
+    }
+    ctx.fillStyle = 'rgba(2,16,10,0.15)';
+    ctx.fillRect(0, 0, W, H);
+    // bottom mist
+    const g = ctx.createLinearGradient(0, H*0.6, 0, H);
+    g.addColorStop(0, 'transparent');
+    g.addColorStop(1, t.accent2);
+    ctx.fillStyle = g; ctx.globalAlpha = 0.1; ctx.fillRect(0,0,W,H); ctx.globalAlpha = 1;
+    s.flies.forEach(f => {
+        f.x += f.vx + (Math.random()-0.5)*0.2;
+        f.y += f.vy; f.phase += f.sp;
+        if (f.y < -5) { f.y = H + 5; f.x = Math.random()*W; }
+        const a = 0.4 + Math.sin(f.phase) * 0.5;
+        // glow
+        ctx.beginPath();
+        ctx.arc(f.x, f.y, f.r * 3, 0, Math.PI*2);
+        ctx.fillStyle = t.accent;
+        ctx.globalAlpha = a * 0.15;
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(f.x, f.y, f.r, 0, Math.PI*2);
+        ctx.globalAlpha = a;
+        ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+}
+
+// ── plasma ───────────────────────────────────────────────
+function drawPlasma(ctx, cvs, t, s) {
+    const W = cvs.width, H = cvs.height;
+    if (!s.p) s.p = 0;
+    s.p += 0.02;
+    const img = ctx.createImageData(Math.floor(W/4), Math.floor(H/4));
+    const d = img.data;
+    const [tr, tg, tb] = hexRgb(t.accent);
+    const [ar, ag, ab] = hexRgb(t.accent2);
+    for (let y = 0; y < img.height; y++) {
+        for (let x = 0; x < img.width; x++) {
+            const v = (Math.sin(x*0.04 + s.p) + Math.sin(y*0.05 + s.p*1.2) + Math.sin((x+y)*0.03 + s.p*0.7)) / 3;
+            const m = (v + 1) / 2;
+            const i = (y * img.width + x) * 4;
+            d[i]   = tr * m + ar * (1-m);
+            d[i+1] = tg * m + ag * (1-m);
+            d[i+2] = tb * m + ab * (1-m);
+            d[i+3] = 40;
+        }
+    }
+    ctx.fillStyle = t.bg;
+    ctx.fillRect(0, 0, W, H);
+    // draw the small image scaled up
+    const tmp = document.createElement('canvas');
+    tmp.width = img.width; tmp.height = img.height;
+    tmp.getContext('2d').putImageData(img, 0, 0);
+    ctx.drawImage(tmp, 0, 0, W, H);
+}
+
+function hexRgb(hex) {
+    const n = parseInt(hex.replace('#',''), 16);
+    return [(n>>16)&0xff, (n>>8)&0xff, n&0xff];
+}
+
+// ── grid (tron-ish) ──────────────────────────────────────
+function drawGrid(ctx, cvs, t, s) {
+    const W = cvs.width, H = cvs.height;
+    if (!s.offset) s.offset = 0;
+    s.offset = (s.offset + 0.4) % 40;
+    ctx.fillStyle = t.bg;
+    ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = t.accent;
+    ctx.globalAlpha = 0.18;
+    ctx.lineWidth = 1;
+    const step = 40;
+    for (let x = -step + s.offset; x < W; x += step) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+    }
+    for (let y = -step + s.offset; y < H; y += step) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+}
+
+// ── synthwave (perspective grid + sun) ───────────────────
+function drawSynthwave(ctx, cvs, t, s) {
+    const W = cvs.width, H = cvs.height;
+    if (!s.p) s.p = 0;
+    s.p += 0.5;
+    ctx.fillStyle = t.bg;
+    ctx.fillRect(0, 0, W, H);
+    // sun
+    const sunY = H * 0.4;
+    const g = ctx.createLinearGradient(0, sunY - 80, 0, sunY + 80);
+    g.addColorStop(0, t.accent2); g.addColorStop(1, t.accent);
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(W/2, sunY, 80, 0, Math.PI*2);
+    ctx.fill();
+    // perspective grid in lower half
+    ctx.strokeStyle = t.accent;
+    ctx.globalAlpha = 0.3;
+    ctx.lineWidth = 1;
+    const horizon = H * 0.55;
+    // horizontal lines
+    for (let i = 0; i < 20; i++) {
+        const progress = ((i * 30 + s.p) % 600) / 600;
+        const y = horizon + progress * (H - horizon);
+        ctx.globalAlpha = 0.3 * (1 - progress);
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    }
+    // vanishing point lines
+    ctx.globalAlpha = 0.3;
+    for (let x = 0; x <= W; x += 60) {
+        ctx.beginPath(); ctx.moveTo(x, H); ctx.lineTo(W/2, horizon); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+}
+
+// ── vapor (drifting gradient blobs) ──────────────────────
+function drawVapor(ctx, cvs, t, s) {
+    const W = cvs.width, H = cvs.height;
+    if (!s.p) s.p = 0;
+    s.p += 0.005;
+    ctx.fillStyle = t.bg;
+    ctx.fillRect(0, 0, W, H);
+    for (let i = 0; i < 4; i++) {
+        const x = W/2 + Math.cos(s.p + i) * W*0.4;
+        const y = H/2 + Math.sin(s.p*1.3 + i*0.7) * H*0.3;
+        const g = ctx.createRadialGradient(x, y, 0, x, y, 300);
+        g.addColorStop(0, i % 2 === 0 ? t.accent : t.accent2);
+        g.addColorStop(1, 'transparent');
+        ctx.fillStyle = g;
+        ctx.globalAlpha = 0.2;
+        ctx.fillRect(0, 0, W, H);
+    }
+    ctx.globalAlpha = 1;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   IDLE ANIMATION :: per-theme ASCII art in the empty state
+// ═══════════════════════════════════════════════════════════════
+
+let idleFrame = 0;
+let idleInterval = null;
+
+// vibe bank - each is a function(frame, theme) => string (multiline)
+const VIBES = {
+    // ── matrix / hacker style: cascading chars ──
+    matrix(f, t) {
+        const W = 60, H = 10;
+        const chars = '01アイウエオカキクケｱｲｳｴｵ0123';
+        const rows = [];
+        for (let y = 0; y < H; y++) {
+            let row = '';
+            for (let x = 0; x < W; x++) {
+                const n = (x * 3 + y * 7 + f * 2 + Math.sin(x * 0.3 + f * 0.1) * 10) | 0;
+                const show = (n % 5) === 0;
+                row += show ? chars[(x + y + f) % chars.length] : ' ';
+            }
+            rows.push(row);
+        }
+        return rows.join('\n');
+    },
+
+    // ── ocean: flowing wave lines ~~~~~ ──
+    ocean(f, t) {
+        const W = 66, H = 7;
+        const rows = [];
+        const chars = ['~', '≈', '∼', '˜'];
+        for (let y = 0; y < H; y++) {
+            let row = '';
+            for (let x = 0; x < W; x++) {
+                const h = Math.sin(x * 0.25 + f * 0.08 + y * 0.4) * 2 + 3;
+                row += y === Math.round(h) ? chars[(x + f) % chars.length]
+                     : y === Math.round(h) + 1 ? '·'
+                     : ' ';
+            }
+            rows.push(row);
+        }
+        return rows.join('\n');
+    },
+
+    // ── galaxy: twinkling star field ──
+    galaxy(f, t) {
+        const W = 60, H = 8;
+        const rows = [];
+        const twinkle = ['·', '✦', '✧', '⋆', '*', '·'];
+        for (let y = 0; y < H; y++) {
+            let row = '';
+            for (let x = 0; x < W; x++) {
+                const seed = (x * 91 + y * 37) % 100;
+                if (seed < 8) {
+                    row += twinkle[(f + seed) % twinkle.length];
+                } else if (seed < 12) {
+                    row += '·';
+                } else row += ' ';
+            }
+            rows.push(row);
+        }
+        return rows.join('\n');
+    },
+
+    // ── warez: classic NFO border ──
+    warez(f, t) {
+        const chars = '▓▒░▒▓█';
+        const top = '░▒▓█'.repeat(18).slice(0, 60);
+        const shift = f % chars.length;
+        const pattern = Array.from({ length: 60 }, (_, i) => chars[(i + shift) % chars.length]).join('');
+        const rev = Array.from({ length: 60 }, (_, i) => chars[(chars.length - (i + shift) % chars.length - 1)]).join('');
+        return [
+            '┌' + '─'.repeat(58) + '┐',
+            '│ ' + pattern.slice(0, 56) + ' │',
+            '│ ' + ' '.repeat(22) + 'N F O  S Y S T E M' + ' '.repeat(16) + '│',
+            '│ ' + rev.slice(0, 56) + ' │',
+            '└' + '─'.repeat(58) + '┘',
+        ].join('\n');
+    },
+
+    // ── cracker: scrolling hex dump ──
+    hacker(f, t) {
+        const rows = [];
+        const hex = () => Math.floor(Math.random() * 256).toString(16).padStart(2, '0').toUpperCase();
+        for (let y = 0; y < 8; y++) {
+            const addr = (0xDEAD + y * 16 + f * 16).toString(16).toUpperCase().padStart(8, '0');
+            const bytes = Array.from({ length: 12 }, () => hex()).join(' ');
+            rows.push(`0x${addr}  ${bytes}`);
+        }
+        return rows.join('\n');
+    },
+
+    // ── cyberpunk: scanning grid ──
+    cyber(f, t) {
+        const W = 60, H = 8;
+        const rows = [];
+        for (let y = 0; y < H; y++) {
+            let row = '';
+            const scanY = f % H;
+            for (let x = 0; x < W; x++) {
+                if (y === scanY) row += '─';
+                else if ((x + y) % 8 === 0) row += '·';
+                else if ((x + f) % 12 === 0 && y % 2 === 0) row += '│';
+                else row += ' ';
+            }
+            rows.push(row);
+        }
+        return rows.join('\n');
+    },
+
+    // ── rain: diagonal streaks ──
+    rain(f, t) {
+        const W = 60, H = 8;
+        const rows = [];
+        const chars = ['/', '│', '╱'];
+        for (let y = 0; y < H; y++) {
+            let row = '';
+            for (let x = 0; x < W; x++) {
+                const n = (x + y * 2 + f) % 7;
+                row += n === 0 ? chars[x % chars.length] : ' ';
+            }
+            rows.push(row);
+        }
+        return rows.join('\n');
+    },
+
+    // ── snow: falling dots ──
+    snow(f, t) {
+        const W = 60, H = 8;
+        const rows = [];
+        const flakes = ['·', '*', '❄', '·'];
+        for (let y = 0; y < H; y++) {
+            let row = '';
+            for (let x = 0; x < W; x++) {
+                const seed = ((x * 13 + (y + f) * 7) % 19);
+                row += seed < 2 ? flakes[seed % flakes.length] : ' ';
+            }
+            rows.push(row);
+        }
+        return rows.join('\n');
+    },
+
+    // ── fire / embers: rising pattern ──
+    fire(f, t) {
+        const W = 60, H = 8;
+        const rows = [];
+        const chars = ' .:oO@';
+        for (let y = 0; y < H; y++) {
+            let row = '';
+            const intensity = H - y;
+            for (let x = 0; x < W; x++) {
+                const n = Math.sin(x * 0.3 + f * 0.2) * 2 + Math.cos(x * 0.1 + f * 0.15 + y) * 2 + intensity;
+                const idx = Math.max(0, Math.min(chars.length - 1, Math.floor(n - 2)));
+                row += chars[idx];
+            }
+            rows.push(row);
+        }
+        return rows.join('\n');
+    },
+
+    // ── vaporwave: bounce ball ──
+    vapor(f, t) {
+        const rows = [];
+        const W = 60;
+        const ball = Math.floor(Math.abs(Math.sin(f * 0.15)) * (W - 8));
+        for (let y = 0; y < 5; y++) {
+            if (y === 2) {
+                rows.push(' '.repeat(ball) + '▒▓█▓▒  ~  A E S T H E T I C');
+            } else if (y === 3) {
+                rows.push(' '.repeat(ball + 1) + '▓█▓');
+            } else {
+                rows.push('');
+            }
+        }
+        // pad to consistent height
+        while (rows.length < 8) rows.push('');
+        return rows.join('\n');
+    },
+
+    // ── plasma: shifting gradient text ──
+    plasma(f, t) {
+        const rows = [];
+        const W = 60, H = 8;
+        const chars = ' ░▒▓█▓▒░';
+        for (let y = 0; y < H; y++) {
+            let row = '';
+            for (let x = 0; x < W; x++) {
+                const v = Math.sin(x * 0.1 + f * 0.1) + Math.sin(y * 0.4 + f * 0.08) + Math.sin((x + y) * 0.15 + f * 0.12);
+                const idx = Math.floor(((v + 3) / 6) * chars.length) % chars.length;
+                row += chars[idx];
+            }
+            rows.push(row);
+        }
+        return rows.join('\n');
+    },
+
+    // ── spinner: classic terminal spinner ──
+    spinner(f, t) {
+        const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+        const sp = frames[f % frames.length];
+        const dots = '.'.repeat(f % 4);
+        return [
+            '',
+            '',
+            '         ' + sp + '   ready ' + dots,
+            '',
+            '     paste a tiktok channel URL above',
+            '',
+            '',
+            '',
+        ].join('\n');
+    },
+
+    // ── terminal: blinking prompt + status ──
+    terminal(f, t) {
+        const lines = [
+            '> system.status................... [OK]',
+            '> shampeh screenshot scraper...... [UP]',
+            '> yt-dlp binary................... [OK]',
+            '> ffmpeg binary................... [OK]',
+            '> phash dedupe engine............. [OK]',
+            '> awaiting channel URL' + (f % 2 === 0 ? '_' : ' '),
+        ];
+        return lines.join('\n');
+    },
+
+    // ── nord/solarized chill: minimal pulse ──
+    pulse(f, t) {
+        const W = 50;
+        const wave = Math.floor((Math.sin(f * 0.1) + 1) / 2 * W);
+        const pre = ' '.repeat(Math.max(0, (W - wave) / 2 | 0));
+        return [
+            '',
+            '',
+            pre + '◈',
+            pre + '◈ ' + '─'.repeat(wave),
+            pre + '◈',
+            '',
+            '',
+            '',
+        ].join('\n');
+    },
+};
+
+// map theme.id → vibe key
+const THEME_VIBES = {
+    matrix: 'matrix', hacker: 'matrix', 'matrix-pink': 'matrix',
+    cyber: 'cyber', tron: 'cyber', shadowrun: 'cyber', ghost: 'cyber',
+    bladerunner: 'cyber', akira: 'cyber', ibm3270: 'terminal',
+    warez: 'warez', 'nfo-classic': 'warez', 'nfo-toxic': 'warez',
+    'nfo-razor': 'warez', 'nfo-fairlight': 'warez', 'nfo-skidrow': 'warez',
+    bloodmoon: 'fire', halloween: 'fire', lava: 'fire', embers: 'fire', 'xmas-cozy': 'fire',
+    ocean: 'ocean', aurora: 'ocean',
+    galaxy: 'galaxy', stars: 'galaxy', 'xmas-snow': 'snow', newyear: 'galaxy', snow: 'snow',
+    forest: 'galaxy',
+    rain: 'rain',
+    vaporwave: 'vapor', 'neon80s': 'vapor', plasma: 'plasma',
+    terminal: 'terminal',
+    midnight: 'pulse', solarized: 'pulse', dracula: 'pulse', nord: 'pulse',
+    gruvbox: 'pulse', monokai: 'pulse', paper: 'pulse',
+};
+
+function startIdleAnim() {
+    stopIdleAnim();
+    const el = document.getElementById('idleArt');
+    if (!el) return;
+    const theme = THEMES.find(t => t.id === document.getElementById('themeSel').value) || THEMES[0];
+    const vibeKey = THEME_VIBES[theme.id] || 'spinner';
+    const vibe = VIBES[vibeKey] || VIBES.spinner;
+    idleFrame = 0;
+    const render = () => {
+        if (!el.isConnected) { stopIdleAnim(); return; }
+        try { el.textContent = vibe(idleFrame++, theme); } catch (_) {}
+    };
+    render();
+    idleInterval = setInterval(render, 120);
+}
+function stopIdleAnim() {
+    if (idleInterval) { clearInterval(idleInterval); idleInterval = null; }
+}
+
+
+function buildThemeDropdown() {
+    const sel = document.getElementById('themeSel');
+    const groups = {};
+    THEMES.forEach(t => {
+        (groups[t.group] = groups[t.group] || []).push(t);
+    });
+    Object.entries(groups).forEach(([g, arr]) => {
+        const og = document.createElement('optgroup');
+        og.label = g;
+        arr.forEach(t => {
+            const opt = document.createElement('option');
+            opt.value = t.id; opt.textContent = t.name;
+            og.appendChild(opt);
+        });
+        sel.appendChild(og);
+    });
+    sel.onchange = () => {
+        applyTheme(sel.value);
+        document.getElementById('saveDefaultBtn').classList.remove('saved');
+        document.getElementById('saveDefaultBtn').textContent = '[ SAVE DEFAULT ]';
+        // if empty state is showing, refresh the idle art for the new theme
+        if (document.getElementById('emptyState')) startIdleAnim();
+    };
+}
+
+async function loadDefaultTheme() {
+    try {
+        const r = await fetch('/config');
+        const c = await r.json();
+        applyTheme(c.theme || 'matrix');
+    } catch { applyTheme('matrix'); }
+    // kick off idle animation once theme is applied
+    startIdleAnim();
+}
+
+document.getElementById('saveDefaultBtn').onclick = async () => {
+    const id = document.getElementById('themeSel').value;
+    try {
+        await fetch('/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ theme: id }),
+        });
+        const btn = document.getElementById('saveDefaultBtn');
+        btn.textContent = '[ ✓ SAVED ]';
+        btn.classList.add('saved');
+    } catch {}
+};
+
+buildThemeDropdown();
+loadDefaultTheme();
+
+// ═══════════════════════════════════════════════════════════════
+//   ORIGINAL APP CODE BELOW
+// ═══════════════════════════════════════════════════════════════
+
+// ─────────── state ───────────
+let currentChannel = null;
+let videos = [];           // full video list from /scrape
+let selected = new Set();  // video IDs
+let activeJob = null;
+
+const $ = s => document.querySelector(s);
+const grid = $('#grid');
+const logEl = $('#log');
+
+// ─────────── helpers ───────────
+function log(type, msg) {
+    const div = document.createElement('div');
+    div.className = 'l-' + type;
+    const ts = new Date().toTimeString().slice(0, 8);
+    div.textContent = `[${ts}] ${msg}`;
+    logEl.appendChild(div);
+    logEl.scrollTop = logEl.scrollHeight;
+}
+function fmtDur(s) {
+    if (!s && s !== 0) return '';
+    const m = Math.floor(s / 60), sec = Math.floor(s % 60);
+    return `${m}:${String(sec).padStart(2, '0')}`;
+}
+function setStatus(s, isErr) {
+    $('#logStatus').textContent = s;
+    $('#logStatus').style.color = isErr ? 'var(--err)' : 'var(--accent)';
+}
+function updateSelCount() {
+    $('#selCount').textContent = selected.size;
+    $('#harvestBtn').disabled = selected.size === 0 || activeJob;
+}
+
+// ─────────── render grid ───────────
+function renderGrid() {
+    grid.innerHTML = '';
+    if (!videos.length) {
+        grid.innerHTML = '<div class="empty" id="emptyState"><pre id="idleArt"></pre><div id="idlePrompt">no videos found</div></div>';
+        startIdleAnim();
+        return;
+    }
+    stopIdleAnim();
+    for (const v of videos) {
+        const card = document.createElement('div');
+        card.className = 'card' + (selected.has(v.id) ? ' selected' : '');
+        card.dataset.id = v.id;
+
+        const thumb = document.createElement('div');
+        thumb.className = 'thumb';
+
+        // try each thumbnail URL in order, fall through on failure
+        const urls = (v.thumbnails && v.thumbnails.length ? v.thumbnails : (v.thumbnail ? [v.thumbnail] : []));
+        if (urls.length) {
+            const img = document.createElement('img');
+            img.loading = 'lazy';
+            img.decoding = 'async';
+            let idx = 0;
+            const tryNext = () => {
+                if (idx >= urls.length) {
+                    // all failed → show error placeholder
+                    img.remove();
+                    const fail = document.createElement('div');
+                    fail.className = 'fail';
+                    fail.textContent = 'thumb unavailable';
+                    thumb.appendChild(fail);
+                    return;
+                }
+                img.src = `/thumb?u=${encodeURIComponent(urls[idx++])}`;
+            };
+            img.onerror = tryNext;
+            tryNext();
+            thumb.appendChild(img);
+        } else {
+            const fail = document.createElement('div');
+            fail.className = 'fail';
+            fail.textContent = 'no thumb';
+            thumb.appendChild(fail);
+        }
+
+        const meta = document.createElement('div');
+        meta.className = 'meta';
+        meta.innerHTML = `<span>${v.id.slice(0, 12)}</span><span class="dur">${fmtDur(v.duration)}</span>`;
+
+        card.appendChild(thumb);
+        card.appendChild(meta);
+        card.onclick = () => {
+            if (selected.has(v.id)) { selected.delete(v.id); card.classList.remove('selected'); }
+            else { selected.add(v.id); card.classList.add('selected'); }
+            updateSelCount();
+        };
+        grid.appendChild(card);
+    }
+    $('#totCount').textContent = videos.length;
+    $('#selectAllBtn').disabled = false;
+    $('#clearBtn').disabled = false;
+}
+
+// ─────────── scrape ───────────
+$('#scrapeBtn').onclick = async () => {
+    const url = $('#url').value.trim();
+    if (!url) return;
+    if (activeJob) return log('err', 'harvest in progress, wait or refresh');
+
+    $('#scrapeBtn').disabled = true;
+    setStatus('scraping...');
+    log('info', `scrape :: ${url}`);
+    selected.clear();
+    updateSelCount();
+
+    // flip idle prompt to scraping state
+    const prompt = document.getElementById('idlePrompt');
+    if (prompt) {
+        prompt.textContent = 'building';
+        prompt.classList.add('scraping');
+    }
+
+    try {
+        const r = await fetch('/scrape', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url }),
+        });
+        let j;
+        try { j = await r.json(); } catch { j = { error: `HTTP ${r.status}: non-JSON response` }; }
+        if (!r.ok) {
+            log('err', `HTTP ${r.status} :: ${j.error || 'unknown'}`);
+            if (j.detail) {
+                j.detail.split(/\r?\n/).slice(-8).forEach(l => l && log('err', `  ${l}`));
+            }
+            throw new Error(j.error || 'scrape failed');
+        }
+
+        currentChannel = j.channel;
+        videos = j.videos;
+        renderGrid();
+        setStatus('idle');
+        log('done', `found ${j.count} videos for @${j.channel}`);
+    } catch (err) {
+        setStatus('error', true);
+        log('err', err.message);
+        log('err', 'check the CMD window where node server.js is running for detailed logs');
+        // restore idle prompt on failure (renderGrid handles success case implicitly)
+        const p = document.getElementById('idlePrompt');
+        if (p) {
+            p.textContent = 'awaiting input';
+            p.classList.remove('scraping');
+        }
+    } finally {
+        $('#scrapeBtn').disabled = false;
+    }
+};
+
+$('#url').addEventListener('keydown', e => {
+    if (e.key === 'Enter') $('#scrapeBtn').click();
+});
+
+$('#selectAllBtn').onclick = () => {
+    videos.forEach(v => selected.add(v.id));
+    document.querySelectorAll('.card').forEach(c => c.classList.add('selected'));
+    updateSelCount();
+};
+$('#clearBtn').onclick = () => {
+    selected.clear();
+    document.querySelectorAll('.card').forEach(c => c.classList.remove('selected'));
+    updateSelCount();
+};
+
+// ─────────── harvest ───────────
+$('#harvestBtn').onclick = async () => {
+    if (!selected.size || activeJob) return;
+
+    const chosen = videos.filter(v => selected.has(v.id));
+    const threshold = parseInt($('#thrSel').value, 10);
+    const quality = $('#qSel').value;
+    $('#harvestBtn').disabled = true;
+    $('#scrapeBtn').disabled = true;
+    setStatus(`harvesting ${chosen.length}...`);
+    $('#progText').textContent = `0 / ${chosen.length}`;
+    $('#progBar').style.width = '0%';
+
+    log('info', `harvest :: ${chosen.length} videos, threshold=${threshold}, quality=${quality}`);
+
+    // open overlay
+    openOverlay(chosen.length);
+
+    try {
+        const r = await fetch('/harvest', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ channel: currentChannel, videos: chosen, threshold, quality }),
+        });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || 'harvest kickoff failed');
+
+        activeJob = j.jobId;
+        streamProgress(j.jobId, chosen.length);
+    } catch (err) {
+        setStatus('error', true);
+        log('err', err.message);
+        ovFail(err.message);
+        $('#scrapeBtn').disabled = false;
+        $('#harvestBtn').disabled = false;
+    }
+};
+
+// ─────────── overlay controller ───────────
+let ovStart = 0, ovTimer = null, ovFrameTotal = 0;
+const ov = {
+    root:    document.getElementById('overlay'),
+    title:   document.getElementById('ovTitle'),
+    done:    document.getElementById('ovDone'),
+    total:   document.getElementById('ovTotal'),
+    pct:     document.getElementById('ovPct'),
+    bar:     document.getElementById('ovBar'),
+    current: document.getElementById('ovCurrent'),
+    phase:   document.getElementById('ovPhase'),
+    frames:  document.getElementById('ovFrames'),
+    elapsed: document.getElementById('ovElapsed'),
+    eta:     document.getElementById('ovEta'),
+    log:     document.getElementById('ovLog'),
+    close:   document.getElementById('ovClose'),
+    dismiss: document.getElementById('ovDismissBtn'),
+    openBtn: document.getElementById('ovOpenFolderBtn'),
+    uniqueGrid:  document.getElementById('ovUniqueGrid'),
+    uniqueCount: document.getElementById('ovUniqueCount'),
+};
+let ovSession = null;
+// weighted phase progress for ETA
+// phase budgets sum to 100 — tune if your harvests skew one way
+const PHASE_BUDGET = { download: 55, hash: 25, cluster: 20 };
+let ovPhaseState = { download: 0, hash: 0, cluster: 0 };
+
+ov.close.onclick = ov.dismiss.onclick = () => {
+    ov.root.classList.remove('visible', 'complete', 'failed');
+    City.stop();
+};
+ov.openBtn.onclick = async () => {
+    if (!ovSession) return;
+    try {
+        await fetch('/open-folder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session: ovSession }),
+        });
+    } catch (_) {}
+};
+
+// ═══════════════════════════════════════════════════════════════
+//   ISLAND CITY :: coastal island → tech metropolis @ night
+//
+//   renders to #cityCanvas; progression driven by City.set(0..100).
+//   Always-animating scene (water, stars, lights flicker) regardless
+//   of harvest progress. Seeded so skyline is consistent.
+// ═══════════════════════════════════════════════════════════════
+const City = (() => {
+    let ctx = null;
+    let W = 560, H = 520;
+    let pct = 0;
+    let t = 0;
+    let raf = null;
+    let dpr = 1;
+
+    // scene data (regenerated on resize)
+    let island = null;      // outline polygon
+    let buildings = null;   // array of building defs
+    let boats = null;       // distant boat lights on water
+    let stars = null;
+    let flyingCars = null;
+    let rainDrops = null;
+    let hologramText = null;
+
+    // deterministic PRNG
+    function seeded(seed) {
+        let s = seed | 0;
+        return () => {
+            s = (s * 9301 + 49297) % 233280;
+            return s / 233280;
+        };
+    }
+
+    // utility: interpolate between color stops as a function of pct
+    function lerpColor(a, b, t) {
+        const pa = a.match(/\w\w/g).map(h => parseInt(h, 16));
+        const pb = b.match(/\w\w/g).map(h => parseInt(h, 16));
+        const r = Math.round(pa[0] + (pb[0] - pa[0]) * t);
+        const g = Math.round(pa[1] + (pb[1] - pa[1]) * t);
+        const bl = Math.round(pa[2] + (pb[2] - pa[2]) * t);
+        return `rgb(${r},${g},${bl})`;
+    }
+
+    function resize() {
+        const c = document.getElementById('cityCanvas');
+        if (!c) return;
+        dpr = Math.min(window.devicePixelRatio || 1, 2);
+        W = c.clientWidth;
+        H = c.clientHeight;
+        c.width = W * dpr;
+        c.height = H * dpr;
+        ctx = c.getContext('2d');
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        generateScene();
+    }
+
+    // horizon line (water meets sky) at ~62% down
+    const horizonY = () => H * 0.62;
+
+    function generateScene() {
+        const r = seeded(1337);
+
+        // ── ISLAND SILHOUETTE ──
+        // gentle curve bumping up from horizon, rocky-but-smooth
+        const islandW = W * 0.78;
+        const islandX = W * 0.11;
+        const islandPeak = horizonY() - 18;
+        const points = [];
+        const segments = 40;
+        for (let i = 0; i <= segments; i++) {
+            const xf = i / segments;
+            const x = islandX + xf * islandW;
+            // bell curve with noise
+            const bell = Math.sin(xf * Math.PI);
+            const noise = (r() - 0.5) * 6;
+            const y = horizonY() - (bell * 28) + noise;
+            points.push([x, y]);
+        }
+        island = { points, left: islandX, right: islandX + islandW, topY: islandPeak };
+
+        // ── BUILDINGS ──
+        // distributed across island, heights vary, some clusters
+        buildings = [];
+        const groundYFor = (x) => {
+            // interpolate island top surface at given x
+            if (x < island.left || x > island.right) return horizonY();
+            const t = (x - island.left) / (island.right - island.left);
+            const idx = t * segments;
+            const i0 = Math.floor(idx);
+            const i1 = Math.min(segments, i0 + 1);
+            const f = idx - i0;
+            return points[i0][1] * (1 - f) + points[i1][1] * f;
+        };
+
+        // place 28 buildings across island
+        for (let i = 0; i < 28; i++) {
+            // bias towards center (taller there, natural city-center feel)
+            const centerBias = r() * r();  // 0..1 skewed towards 0
+            const side = r() < 0.5 ? -1 : 1;
+            const x = island.left + island.right * 0.5 + (1 - centerBias) * (island.right - island.left) * 0.45 * side;
+            const w = 14 + Math.floor(r() * 26);
+            const bx = x - w / 2;
+            if (bx < island.left - 5 || bx + w > island.right + 5) continue;
+            const groundY = groundYFor(bx + w / 2);
+
+            // height: taller in center, shorter at edges
+            const heightBias = 1 - Math.abs((bx + w / 2) - (island.left + island.right) / 2) / ((island.right - island.left) / 2);
+            const maxH = 30 + heightBias * (100 + r() * 140);
+            const kind = heightBias > 0.7 && r() < 0.35 ? 'tower' : heightBias > 0.4 && r() < 0.35 ? 'mid' : 'low';
+
+            buildings.push({
+                x: bx,
+                w,
+                h: maxH,
+                groundY,
+                kind,
+                windowCols: Math.max(2, Math.floor(w / 5)),
+                windowSeed: Math.floor(r() * 99999),
+                hasNeon: r() < 0.35,
+                neonColor: ['#ff1e5d', '#00eaff', '#ffee00', '#a855f7', '#00ff88', '#ff6ec7'][Math.floor(r() * 6)],
+                hasAntenna: r() < 0.5,
+                spawnPct: 15 + i * 1.8 + r() * 6, // spread appearance across 15-80%
+                // layering: deeper z → drawn first, slightly darker
+                z: r(),
+            });
+        }
+        // mega tower (the centerpiece) — always one, center of island
+        const megaX = (island.left + island.right) / 2 - 32;
+        const megaGround = groundYFor(megaX + 32);
+        buildings.push({
+            x: megaX,
+            w: 64,
+            h: 280,
+            groundY: megaGround,
+            kind: 'mega',
+            windowCols: 10,
+            windowSeed: 7777,
+            hasNeon: false,
+            hasAntenna: true,
+            spawnPct: 65,
+            z: 0.5,
+        });
+        buildings.sort((a, b) => a.z - b.z);
+
+        // ── BOATS on water ──
+        boats = Array.from({ length: 8 }, () => ({
+            x: r() * W,
+            y: horizonY() + 8 + r() * (H - horizonY() - 40),
+            speed: 0.1 + r() * 0.25,
+            color: r() < 0.5 ? '#ffaa55' : '#ffffff',
+        }));
+
+        // ── STARS ──
+        stars = Array.from({ length: 140 }, () => ({
+            x: r() * W,
+            y: r() * horizonY() * 0.95,
+            size: r() * 1.4,
+            phase: r() * Math.PI * 2,
+            sp: 0.015 + r() * 0.04,
+        }));
+
+        flyingCars = [];
+        rainDrops = [];
+
+        hologramText = [
+            { text: '◆ NEO-ISLE ◆',    x: W * 0.08, y: horizonY() - 140, color: '#00eaff', speed: 0.025 },
+            { text: 'UPLOAD.DREAMS',   x: W * 0.55, y: horizonY() - 90,  color: '#ff44cc', speed: 0.035 },
+            { text: '>> DATA STREAM <<', x: W * 0.3, y: horizonY() - 200, color: '#88ff44', speed: 0.02  },
+        ];
+    }
+
+    // ─────────── draws ───────────
+
+    function drawSky() {
+        // pct 0-10: dawn dark blue-purple
+        // pct 10-40: twilight deep purple
+        // pct 40+: night, deeper+richer
+        const phase = pct < 15 ? pct / 15 : 1;
+        const top = lerpColor('0a1028', '04061a', phase);
+        const mid = lerpColor('1a1040', '0a0428', phase);
+        const horizonCol = lerpColor('401540', '2a0a35', phase);
+
+        const g = ctx.createLinearGradient(0, 0, 0, horizonY());
+        g.addColorStop(0, top);
+        g.addColorStop(0.65, mid);
+        g.addColorStop(1, horizonCol);
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, W, horizonY());
+
+        // moon / distant glow on right side
+        if (pct >= 2) {
+            const glowA = Math.min(1, (pct - 2) / 8) * 0.5;
+            const mx = W * 0.78, my = horizonY() - 80;
+            const grad = ctx.createRadialGradient(mx, my, 0, mx, my, 160);
+            grad.addColorStop(0, `rgba(255,180,210,${glowA * 0.8})`);
+            grad.addColorStop(0.3, `rgba(200,140,200,${glowA * 0.3})`);
+            grad.addColorStop(1, 'rgba(100,60,100,0)');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, W, horizonY() + 20);
+
+            // moon disc
+            ctx.beginPath();
+            ctx.arc(mx, my, 14, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(255,220,235,${glowA})`;
+            ctx.fill();
+        }
+    }
+
+    function drawStars() {
+        // stars visible early, fade as city lights up
+        const fade = Math.max(0, 1 - Math.max(0, pct - 55) / 45);
+        if (fade <= 0.05) return;
+        for (const s of stars) {
+            s.phase += s.sp;
+            const a = (0.3 + Math.sin(s.phase) * 0.5) * fade;
+            if (a <= 0) continue;
+            ctx.fillStyle = `rgba(255,240,220,${a.toFixed(2)})`;
+            ctx.fillRect(s.x, s.y, s.size, s.size);
+            // occasional brighter ones get cross spike
+            if (s.size > 1.0 && a > 0.6) {
+                ctx.fillStyle = `rgba(255,240,220,${(a * 0.5).toFixed(2)})`;
+                ctx.fillRect(s.x - 1, s.y + s.size / 2 - 0.25, s.size + 2, 0.5);
+                ctx.fillRect(s.x + s.size / 2 - 0.25, s.y - 1, 0.5, s.size + 2);
+            }
+        }
+    }
+
+    function drawWater() {
+        // water body with animated shimmer
+        const hy = horizonY();
+        // base water gradient
+        const g = ctx.createLinearGradient(0, hy, 0, H);
+        // water tint shifts: dusky lavender early → deep indigo with neon tints late
+        const phase = Math.min(1, pct / 70);
+        const nearHorizon = lerpColor('2a1540', '081028', phase);
+        const deep = lerpColor('0a0418', '02010a', phase);
+        g.addColorStop(0, nearHorizon);
+        g.addColorStop(1, deep);
+        ctx.fillStyle = g;
+        ctx.fillRect(0, hy, W, H - hy);
+
+        // horizon haze line
+        ctx.fillStyle = 'rgba(120,80,140,0.25)';
+        ctx.fillRect(0, hy - 1, W, 2);
+
+        // animated horizontal ripples
+        ctx.save();
+        for (let y = hy + 6; y < H; y += 4) {
+            const depth = (y - hy) / (H - hy);
+            const alpha = 0.08 * (1 - depth * 0.7);
+            const amp = 6 + depth * 15;
+            const phase2 = t * 0.02 + y * 0.1;
+            ctx.strokeStyle = `rgba(180,180,230,${alpha.toFixed(3)})`;
+            ctx.lineWidth = 0.5;
+            ctx.beginPath();
+            for (let x = 0; x <= W; x += 8) {
+                const yy = y + Math.sin(x * 0.03 + phase2) * (0.5 + depth * 1.2);
+                if (x === 0) ctx.moveTo(x, yy);
+                else ctx.lineTo(x, yy);
+            }
+            ctx.stroke();
+        }
+        ctx.restore();
+    }
+
+    function drawWaterReflections() {
+        // reflect building neon glow onto water as vertical smeared streaks
+        if (pct < 45) return;
+        const intensity = Math.min(1, (pct - 45) / 30);
+        const hy = horizonY();
+        for (const b of buildings) {
+            if (!b.hasNeon) continue;
+            if (pct < b.spawnPct + 10) continue;
+            const cx = b.x + b.w / 2;
+            const refLen = Math.min(100, (H - hy) * 0.6);
+            const g = ctx.createLinearGradient(cx, hy, cx, hy + refLen);
+            g.addColorStop(0, b.neonColor);
+            g.addColorStop(1, 'transparent');
+            ctx.fillStyle = g;
+            ctx.globalAlpha = 0.18 * intensity * (0.7 + Math.sin(t * 0.1 + b.x) * 0.3);
+            // wavy column (sine-warped)
+            const wavyW = b.w * 0.6;
+            ctx.beginPath();
+            ctx.moveTo(cx - wavyW / 2, hy);
+            for (let yy = hy; yy <= hy + refLen; yy += 4) {
+                const warp = Math.sin(yy * 0.2 + t * 0.1) * 2.5;
+                ctx.lineTo(cx - wavyW / 2 + warp, yy);
+            }
+            for (let yy = hy + refLen; yy >= hy; yy -= 4) {
+                const warp = Math.sin(yy * 0.2 + t * 0.1 + 0.5) * 2.5;
+                ctx.lineTo(cx + wavyW / 2 + warp, yy);
+            }
+            ctx.closePath();
+            ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+    }
+
+    function drawBoats() {
+        // a few boat lights drifting on water
+        if (pct < 8) return;
+        const visible = Math.min(boats.length, Math.floor((pct - 8) / 3) + 1);
+        for (let i = 0; i < visible; i++) {
+            const boat = boats[i];
+            boat.x += boat.speed;
+            if (boat.x > W + 10) boat.x = -10;
+            // tiny boat silhouette
+            ctx.fillStyle = '#05030a';
+            ctx.fillRect(boat.x, boat.y, 5, 2);
+            // light glow
+            ctx.fillStyle = boat.color;
+            ctx.shadowColor = boat.color;
+            ctx.shadowBlur = 6;
+            const flicker = 0.7 + Math.sin(t * 0.2 + boat.x) * 0.3;
+            ctx.globalAlpha = flicker;
+            ctx.fillRect(boat.x + 2, boat.y - 1, 1, 1);
+            ctx.globalAlpha = 1;
+            ctx.shadowBlur = 0;
+            // water reflection of boat light
+            ctx.fillStyle = boat.color;
+            ctx.globalAlpha = 0.25 * flicker;
+            ctx.fillRect(boat.x + 1, boat.y + 3, 3, 1);
+            ctx.globalAlpha = 1;
+        }
+    }
+
+    function drawIsland() {
+        // island silhouette — always visible but darker early, lighter-rimmed when lit
+        ctx.fillStyle = '#03020a';
+        ctx.beginPath();
+        ctx.moveTo(island.left, horizonY());
+        for (const [x, y] of island.points) ctx.lineTo(x, y);
+        ctx.lineTo(island.right, horizonY());
+        ctx.closePath();
+        ctx.fill();
+
+        // rim light on top edge when city is lit
+        if (pct >= 30) {
+            const rimA = Math.min(1, (pct - 30) / 20) * 0.25;
+            ctx.strokeStyle = `rgba(255,150,220,${rimA.toFixed(2)})`;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            let first = true;
+            for (const [x, y] of island.points) {
+                if (first) { ctx.moveTo(x, y); first = false; }
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+        }
+    }
+
+    function drawBuildings() {
+        for (const b of buildings) {
+            if (pct < b.spawnPct) continue;
+            const localProgress = Math.min(1, (pct - b.spawnPct) / 3);
+            const actualH = b.h * localProgress;
+            const top = b.groundY - actualH;
+
+            // building body with subtle gradient for 3D feel
+            const bodyGrad = ctx.createLinearGradient(b.x, 0, b.x + b.w, 0);
+            bodyGrad.addColorStop(0, '#0a0718');
+            bodyGrad.addColorStop(0.5, '#141028');
+            bodyGrad.addColorStop(1, '#060410');
+            ctx.fillStyle = bodyGrad;
+            ctx.fillRect(b.x, top, b.w, actualH);
+
+            // subtle rim light on left edge (hint of neon reflecting)
+            if (pct >= 45 && localProgress >= 1) {
+                ctx.fillStyle = 'rgba(255,100,180,0.15)';
+                ctx.fillRect(b.x, top, 1, actualH);
+                ctx.fillStyle = 'rgba(100,200,255,0.1)';
+                ctx.fillRect(b.x + b.w - 1, top, 1, actualH);
+            }
+
+            // windows
+            if (localProgress >= 1 && pct >= 30) {
+                const lit = Math.min(1, (pct - 30) / 45);
+                const r = seeded(b.windowSeed);
+                const cellW = (b.w - 4) / b.windowCols;
+                const rowH = 6;
+                const rows = Math.floor(actualH / rowH) - 1;
+                for (let row = 0; row < rows; row++) {
+                    for (let col = 0; col < b.windowCols; col++) {
+                        const rand = r();
+                        if (rand > lit) continue;
+                        if (rand < 0.08) continue;
+                        const wx = b.x + 2 + col * cellW + 0.5;
+                        const wy = top + 4 + row * rowH;
+                        const ww = Math.max(1, cellW - 2);
+                        // flicker
+                        const flickerSeed = rand * 100 + t * 0.03;
+                        const flicker = (flickerSeed % 1) > 0.97 ? 0.15 : 1;
+                        // window color palette
+                        const wc =
+                            rand < 0.15 ? '#ffee88' :
+                            rand < 0.28 ? '#ffccaa' :
+                            rand < 0.42 ? '#88ccff' :
+                            rand < 0.55 ? '#ff99dd' :
+                            rand < 0.70 ? '#aaffdd' :
+                            '#ffaa66';
+                        ctx.globalAlpha = flicker * 0.85;
+                        ctx.fillStyle = wc;
+                        ctx.fillRect(wx, wy, ww, 2.5);
+                    }
+                }
+                ctx.globalAlpha = 1;
+            }
+
+            // neon sign 50%+
+            if (b.hasNeon && localProgress >= 1 && pct >= 50) {
+                const neonA = Math.min(1, (pct - 50) / 8);
+                const signY = top + Math.min(30, actualH * 0.25);
+                const pulse = 0.7 + Math.sin(t * 0.1 + b.x) * 0.3;
+                ctx.shadowColor = b.neonColor;
+                ctx.shadowBlur = 10;
+                ctx.fillStyle = b.neonColor;
+                ctx.globalAlpha = neonA * pulse;
+                ctx.fillRect(b.x + 2, signY, b.w - 4, 2);
+                ctx.fillRect(b.x + 2, signY + 5, b.w - 4, 2);
+                ctx.shadowBlur = 0;
+                ctx.globalAlpha = 1;
+            }
+
+            // antenna + warning light
+            if (b.hasAntenna && localProgress >= 1 && pct >= 40) {
+                ctx.fillStyle = '#1a1525';
+                ctx.fillRect(b.x + b.w / 2 - 0.5, top - 12, 1, 12);
+                if ((t >> 3) % 2 === 0) {
+                    ctx.shadowColor = '#ff2244';
+                    ctx.shadowBlur = 5;
+                    ctx.fillStyle = '#ff3355';
+                    ctx.fillRect(b.x + b.w / 2 - 1, top - 14, 2, 2);
+                    ctx.shadowBlur = 0;
+                }
+            }
+
+            // mega tower tapered spire
+            if (b.kind === 'mega' && localProgress >= 1 && pct >= 67) {
+                ctx.fillStyle = '#0c0820';
+                ctx.beginPath();
+                ctx.moveTo(b.x + b.w / 2 - 4, top);
+                ctx.lineTo(b.x + b.w / 2 + 4, top);
+                ctx.lineTo(b.x + b.w / 2 + 1, top - 40);
+                ctx.lineTo(b.x + b.w / 2 - 1, top - 40);
+                ctx.closePath();
+                ctx.fill();
+                // spire tip pulse
+                const pulse = 0.5 + Math.sin(t * 0.15) * 0.5;
+                ctx.shadowColor = '#ff3377';
+                ctx.shadowBlur = 12 * pulse;
+                ctx.fillStyle = '#ff3377';
+                ctx.fillRect(b.x + b.w / 2 - 1.5, top - 42, 3, 3);
+                ctx.shadowBlur = 0;
+            }
+        }
+    }
+
+    function drawSearchlights() {
+        if (pct < 72) return;
+        const intensity = Math.min(1, (pct - 72) / 10);
+        // two searchlights from mega-tower area
+        const bases = [
+            { x: W * 0.45, y: horizonY() - 60, speed: 0.017 },
+            { x: W * 0.55, y: horizonY() - 60, speed: -0.013 },
+        ];
+        for (const b of bases) {
+            const angle = Math.sin(t * b.speed + b.x) * 0.7 - Math.PI / 2;
+            const len = 300;
+            const ex = b.x + Math.cos(angle) * len;
+            const ey = b.y + Math.sin(angle) * len;
+            const g = ctx.createLinearGradient(b.x, b.y, ex, ey);
+            g.addColorStop(0, `rgba(255,240,220,${(0.28 * intensity).toFixed(2)})`);
+            g.addColorStop(1, 'rgba(255,240,220,0)');
+            ctx.fillStyle = g;
+            ctx.beginPath();
+            ctx.moveTo(b.x, b.y);
+            ctx.lineTo(ex - Math.sin(angle) * 18, ey + Math.cos(angle) * 18);
+            ctx.lineTo(ex + Math.sin(angle) * 18, ey - Math.cos(angle) * 18);
+            ctx.closePath();
+            ctx.fill();
+        }
+    }
+
+    function drawFlyingCars() {
+        if (pct < 70) return;
+        const maxCars = Math.min(10, Math.floor((pct - 70) / 4) + 1);
+        while (flyingCars.length < maxCars) {
+            flyingCars.push({
+                x: Math.random() * W,
+                y: 40 + Math.random() * (horizonY() - 100),
+                vx: (Math.random() < 0.5 ? -1 : 1) * (1.2 + Math.random() * 2.5),
+                color: ['#ff3377', '#00eaff', '#ffaa55'][Math.floor(Math.random() * 3)],
+            });
+        }
+        for (const c of flyingCars) {
+            c.x += c.vx;
+            if (c.x < -20) c.x = W + 20;
+            if (c.x > W + 20) c.x = -20;
+            // body
+            ctx.fillStyle = '#000';
+            ctx.fillRect(c.x, c.y, 5, 1.5);
+            // headlight
+            ctx.shadowColor = c.color;
+            ctx.shadowBlur = 7;
+            ctx.fillStyle = c.color;
+            const tx = c.vx > 0 ? c.x + 5 : c.x - 1;
+            ctx.fillRect(tx, c.y, 2, 1);
+            // trail
+            ctx.globalAlpha = 0.3;
+            const trailX = c.vx > 0 ? c.x - 14 : c.x + 5;
+            ctx.fillRect(trailX, c.y + 0.3, 14, 0.8);
+            ctx.globalAlpha = 1;
+            ctx.shadowBlur = 0;
+        }
+    }
+
+    function drawHolograms() {
+        if (pct < 80) return;
+        const intensity = Math.min(1, (pct - 80) / 8);
+        ctx.save();
+        for (const h of hologramText) {
+            h.y += Math.sin(t * h.speed) * 0.15;
+            const pulse = 0.4 + Math.sin(t * 0.05 + h.x) * 0.25;
+            ctx.font = 'bold 13px "Consolas", "Courier New", monospace';
+            ctx.shadowColor = h.color;
+            ctx.shadowBlur = 10;
+            ctx.fillStyle = h.color;
+            ctx.globalAlpha = intensity * pulse;
+            ctx.fillText(h.text, h.x, h.y);
+            // scanline through the text
+            ctx.globalAlpha = intensity * 0.2;
+            ctx.fillRect(h.x - 2, h.y - 10 + ((t * 0.5) % 13), 100, 1);
+        }
+        ctx.restore();
+    }
+
+    function drawRain() {
+        if (pct < 92) return;
+        const intensity = Math.min(1, (pct - 92) / 8);
+        const maxDrops = Math.floor(220 * intensity);
+        while (rainDrops.length < maxDrops) {
+            rainDrops.push({
+                x: Math.random() * W,
+                y: Math.random() * H,
+                sp: 9 + Math.random() * 9,
+                len: 7 + Math.random() * 9,
+            });
+        }
+        ctx.strokeStyle = 'rgba(180,200,255,0.35)';
+        ctx.lineWidth = 1;
+        for (const d of rainDrops) {
+            ctx.beginPath();
+            ctx.moveTo(d.x, d.y);
+            ctx.lineTo(d.x - 2, d.y + d.len);
+            ctx.stroke();
+            d.y += d.sp;
+            d.x -= 2;
+            if (d.y > H) { d.y = -12; d.x = Math.random() * W; }
+        }
+    }
+
+    function drawLightning() {
+        if (pct < 96) return;
+        if (Math.random() < 0.012) {
+            ctx.fillStyle = 'rgba(200,220,255,0.35)';
+            ctx.fillRect(0, 0, W, H);
+        }
+    }
+
+    function drawFog() {
+        // early low mist on water, fades as city grows
+        const fade = pct < 18 ? 1 - pct / 18 : 0;
+        if (fade <= 0) return;
+        const g = ctx.createLinearGradient(0, horizonY() - 10, 0, horizonY() + 30);
+        g.addColorStop(0, `rgba(80,60,100,${(0.3 * fade).toFixed(2)})`);
+        g.addColorStop(1, `rgba(80,60,100,0)`);
+        ctx.fillStyle = g;
+        ctx.fillRect(0, horizonY() - 10, W, 50);
+    }
+
+    function stageLabel(p) {
+        if (p < 3)   return 'BARE ISLAND';
+        if (p < 8)   return 'DAWN APPROACH';
+        if (p < 12)  return 'TWILIGHT';
+        if (p < 18)  return 'FIRST LIGHTS';
+        if (p < 25)  return 'SHORESIDE STRUCTURES';
+        if (p < 32)  return 'HARBOR FORMING';
+        if (p < 40)  return 'DISTRICT RISING';
+        if (p < 48)  return 'SKYLINE EMERGING';
+        if (p < 55)  return 'WINDOWS ALIGHT';
+        if (p < 62)  return 'NEON ONLINE';
+        if (p < 68)  return 'CENTER CITY PULSING';
+        if (p < 74)  return 'MEGA-TOWER ERECTED';
+        if (p < 80)  return 'AIR TRAFFIC ACTIVE';
+        if (p < 86)  return 'HOLOGRAMS DEPLOYED';
+        if (p < 92)  return 'FULL DENSITY';
+        if (p < 96)  return 'STORM MOVING IN';
+        if (p < 100) return 'METROPOLIS ALIVE';
+        return 'COMPLETE';
+    }
+
+    function render() {
+        if (!ctx) return;
+        ctx.clearRect(0, 0, W, H);
+        drawSky();
+        drawStars();
+        drawWater();
+        drawBoats();
+        drawIsland();
+        drawFog();
+        drawBuildings();
+        drawSearchlights();
+        drawWaterReflections();
+        drawFlyingCars();
+        drawHolograms();
+        drawRain();
+        drawLightning();
+        t++;
+    }
+
+    function loop() {
+        render();
+        raf = requestAnimationFrame(loop);
+    }
+
+    return {
+        start() {
+            if (raf) return;
+            requestAnimationFrame(() => {
+                resize();
+                pct = 0; t = 0;
+                document.getElementById('cityStage').textContent = stageLabel(0);
+                document.getElementById('cityPct').textContent = '0%';
+                loop();
+            });
+        },
+        stop() {
+            if (raf) { cancelAnimationFrame(raf); raf = null; }
+        },
+        set(newPct) {
+            pct = Math.max(0, Math.min(100, newPct));
+            const s = document.getElementById('cityStage');
+            const p = document.getElementById('cityPct');
+            if (s) s.textContent = stageLabel(pct);
+            if (p) p.textContent = `${Math.floor(pct)}%`;
+        },
+        resize,
+    };
+})();
+
+window.addEventListener('resize', () => City.resize());
+
+function openOverlay(total) {
+    ov.root.classList.add('visible');
+    ov.root.classList.remove('complete', 'failed');
+    ov.title.textContent = '▶ HARVESTING FRAMES';
+    ov.done.textContent = '0';
+    ov.total.textContent = total;
+    ov.pct.textContent = '0%';
+    ov.bar.style.width = '0%';
+    ov.current.textContent = 'queued...';
+    ov.phase.textContent = '—';
+    ov.frames.textContent = '0';
+    ov.elapsed.textContent = '0:00';
+    ov.log.innerHTML = '';
+    ov.dismiss.style.display = 'none';
+    ov.openBtn.style.display = 'none';
+    document.getElementById('ovFoot').style.display = 'none';
+    ov.uniqueGrid.innerHTML = '<div class="ov-unique-empty">nothing yet — keepers appear during clustering</div>';
+    ov.uniqueCount.textContent = '0';
+    ovSession = null;
+    ovFrameTotal = 0;
+    ovStart = Date.now();
+    ovPhaseState = { download: 0, hash: 0, cluster: 0 };
+    ov.eta.textContent = '—';
+    clearInterval(ovTimer);
+    ovTimer = setInterval(() => {
+        const s = Math.floor((Date.now() - ovStart) / 1000);
+        ov.elapsed.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+
+        // weighted overall progress 0-100
+        const overall =
+            (ovPhaseState.download / 100) * PHASE_BUDGET.download +
+            (ovPhaseState.hash     / 100) * PHASE_BUDGET.hash +
+            (ovPhaseState.cluster  / 100) * PHASE_BUDGET.cluster;
+
+        // only show ETA once we have meaningful progress (avoids wild first estimates)
+        if (overall > 3 && overall < 99.5 && s > 2) {
+            const remaining = (s / overall) * (100 - overall);
+            const r = Math.max(1, Math.round(remaining));
+            const m = Math.floor(r / 60), sec = r % 60;
+            ov.eta.textContent = m > 0 ? `~${m}m ${sec}s` : `~${sec}s`;
+        } else if (overall >= 99.5) {
+            ov.eta.textContent = 'finishing...';
+        }
+    }, 500);
+    City.start();
+}
+function ovLog(cls, msg) {
+    const d = document.createElement('div');
+    if (cls) d.className = cls;
+    d.textContent = msg;
+    ov.log.appendChild(d);
+    ov.log.scrollTop = ov.log.scrollHeight;
+    // cap at 40 lines so the log doesn't balloon memory
+    while (ov.log.children.length > 40) ov.log.removeChild(ov.log.firstChild);
+}
+function ovComplete(msg) {
+    ov.root.classList.add('complete');
+    ov.title.textContent = '✓ HARVEST COMPLETE';
+    ov.pct.textContent = '100%';
+    ov.bar.style.width = '100%';
+    ov.phase.textContent = 'done';
+    ov.current.textContent = '—';
+    ov.eta.textContent = 'done';
+    document.getElementById('ovFoot').style.display = 'flex';
+    ov.dismiss.style.display = 'inline-block';
+    if (ovSession) ov.openBtn.style.display = 'inline-block';
+    ovLog('ok', msg);
+    clearInterval(ovTimer);
+    City.set(100);
+}
+function ovFail(msg) {
+    ov.root.classList.add('visible', 'failed');
+    ov.title.textContent = '✗ HARVEST FAILED';
+    ov.eta.textContent = '—';
+    document.getElementById('ovFoot').style.display = 'flex';
+    ov.dismiss.style.display = 'inline-block';
+    ovLog('err', msg);
+    clearInterval(ovTimer);
+}
+
+// ─────────── SSE progress ───────────
+function streamProgress(jobId, total) {
+    const es = new EventSource(`/progress/${jobId}`);
+    let extracted = 0;
+    let currentPhase = 'extract';  // 'extract' | 'hash' | 'cluster'
+
+    es.onmessage = ev => {
+        const m = JSON.parse(ev.data);
+        switch (m.type) {
+            case 'info':
+                log('info', m.msg);
+                const startMatch = m.msg.match(/\[(\d+)\/\d+\]\s+(\S+)\s+::\s+extract/);
+                if (startMatch) {
+                    ov.current.textContent = startMatch[2];
+                    ov.phase.textContent = 'starting';
+                    ovLog('', `▶ [${startMatch[1]}] ${startMatch[2]}`);
+                }
+                break;
+
+            case 'phase':
+                currentPhase = m.phase;
+                if (m.phase === 'extract') {
+                    ov.title.textContent = '▶ PHASE 1 :: EXTRACTING';
+                } else if (m.phase === 'dedupe') {
+                    ov.title.textContent = '▶ PHASE 2 :: CLUSTERING';
+                    ov.current.textContent = 'all videos pooled';
+                }
+                ovLog('', `══ ${m.msg} ══`);
+                log('step', m.msg);
+                break;
+
+            case 'step':
+                log('step', `  → ${m.phase}: ${m.msg}`);
+                ov.phase.textContent = m.phase;
+                ovLog('', `  ${m.phase}: ${m.msg}`);
+                break;
+
+            case 'progress':
+                if (m.phase === 'download' && m.pct) {
+                    if (m.pct % 25 < 1) log('prog', `  ${m.videoId} dl ${m.pct.toFixed(0)}%`);
+                    ov.phase.textContent = `download ${m.pct.toFixed(0)}%`;
+                    // current-video dl% → factor into overall download phase progress
+                    // this gives smoother ETA than only updating on video_extracted
+                    const completedVideos = extracted;
+                    const currentVideoFraction = m.pct / 100;
+                    const downloadPct = ((completedVideos + currentVideoFraction) / total) * 100;
+                    ovPhaseState.download = Math.min(99, downloadPct);
+                } else if (m.phase === 'hash' && m.pct) {
+                    ov.phase.textContent = `hashing ${m.pct.toFixed(0)}%`;
+                    const hpct = m.pct / 2;  // hash is first half of phase 2
+                    ov.pct.textContent = `${(50 + hpct).toFixed(0)}%`;
+                    ov.bar.style.width = `${(50 + hpct).toFixed(1)}%`;
+                    City.set(50 + hpct);
+                    ovPhaseState.download = 100;
+                    ovPhaseState.hash = m.pct;
+                } else if (m.phase === 'cluster' && m.pct) {
+                    if (m.pct % 20 < 2) log('prog', `  cluster ${m.pct.toFixed(0)}% :: ${m.kept} kept of ${m.scanned}`);
+                    ov.phase.textContent = `cluster ${m.pct.toFixed(0)}%`;
+                    ov.frames.textContent = m.kept;
+                    // cluster is second half of phase 2
+                    const cpct = m.pct / 2;
+                    ov.pct.textContent = `${(75 + cpct/2).toFixed(0)}%`;
+                    ov.bar.style.width = `${(75 + cpct/2).toFixed(1)}%`;
+                    City.set(75 + cpct/2);
+                    ovPhaseState.download = 100;
+                    ovPhaseState.hash = 100;
+                    ovPhaseState.cluster = m.pct;
+                }
+                break;
+
+            case 'video_extracted':
+                extracted++;
+                log('done', m.msg);
+                $('#progText').textContent = `${extracted} / ${total}`;
+                $('#progBar').style.width = `${(extracted / total * 50).toFixed(1)}%`;
+                // phase 1 accounts for first 50% of overall progress
+                ov.done.textContent = extracted;
+                const p1pct = (extracted / total) * 50;
+                ov.pct.textContent = `${p1pct.toFixed(0)}%`;
+                ov.bar.style.width = `${p1pct.toFixed(1)}%`;
+                City.set(p1pct);
+                ovLog('ok', `✓ ${m.videoId} → ${m.extracted} raw`);
+                // snap download phase to exact % of videos completed
+                ovPhaseState.download = (extracted / total) * 100;
+                break;
+
+            case 'err':
+                log('err', m.msg);
+                ovLog('err', m.msg);
+                break;
+
+            case 'kept':
+                // add the newly-detected unique frame to the grid
+                if (!ovSession && m.session) ovSession = m.session;
+                if (m.session && m.filename) {
+                    // clear "empty" placeholder on first add
+                    const empty = ov.uniqueGrid.querySelector('.ov-unique-empty');
+                    if (empty) empty.remove();
+                    const img = document.createElement('img');
+                    img.src = `/frame?s=${encodeURIComponent(m.session)}&f=${encodeURIComponent(m.filename)}`;
+                    img.title = m.filename;
+                    img.loading = 'lazy';
+                    // prepend so newest shows first (gives you a live feed feel)
+                    ov.uniqueGrid.insertBefore(img, ov.uniqueGrid.firstChild);
+                    // cap visible thumbs at 60 to keep DOM/memory reasonable
+                    while (ov.uniqueGrid.children.length > 60) {
+                        ov.uniqueGrid.removeChild(ov.uniqueGrid.lastChild);
+                    }
+                    ov.uniqueCount.textContent = m.seq || (parseInt(ov.uniqueCount.textContent, 10) + 1);
+                    ov.frames.textContent = m.seq;
+                }
+                break;
+
+            case 'complete':
+                log('done', m.msg);
+                setStatus('complete');
+                $('#progText').textContent = `${total} / ${total}`;
+                $('#progBar').style.width = '100%';
+                es.close();
+                activeJob = null;
+                $('#scrapeBtn').disabled = false;
+                updateSelCount();
+                // capture session name for the Open Folder button
+                if (m.session) ovSession = m.session;
+                // finalize overlay with the real numbers
+                if (typeof m.totalKept === 'number') {
+                    ov.frames.textContent = m.totalKept;
+                    ovLog('ok', `${m.totalRaw} raw → ${m.totalKept} unique scenes`);
+                }
+                ovComplete(m.msg);
+                break;
+        }
+    };
+    es.onerror = () => {
+        if (activeJob) {
+            log('err', 'SSE connection dropped');
+            ovLog('err', 'stream disconnected');
+        }
+        es.close();
+    };
+}
+</script>
+</body>
+</html>

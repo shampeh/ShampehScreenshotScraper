@@ -1,0 +1,12 @@
+{
+  "name": "shampeh-screenshot-scraper",
+  "version": "1.0.0",
+  "description": "Shampeh Screenshot Scraper :: TikTok channel -> thumbnail grid -> selective video download -> global pHash cluster dedupe -> unique scene frames",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
