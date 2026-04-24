@@ -105,6 +105,147 @@ function runCapture(cmd, args, { onLine } = {}) {
     });
 }
 
+// ── zip builder (zero-dep, STORE mode) ─────────────────────────
+//
+// Screenshots are already entropy-dense (JPEG/PNG), so DEFLATE would
+// burn CPU for ~0% gain. STORE (no compression) is the right call —
+// the zip exists to bundle files for sharing, not to shrink them.
+//
+// Writes directly to disk in a single pass (no in-memory buffering of
+// all file bytes), so it scales to thousands of frames without RAM spikes.
+
+// precompute CRC-32 table
+const CRC32_TABLE = (() => {
+    const t = new Uint32Array(256);
+    for (let i = 0; i < 256; i++) {
+        let c = i;
+        for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+        t[i] = c >>> 0;
+    }
+    return t;
+})();
+
+function crc32Update(crc, buf) {
+    let c = crc ^ 0xFFFFFFFF;
+    for (let i = 0; i < buf.length; i++) {
+        c = CRC32_TABLE[(c ^ buf[i]) & 0xFF] ^ (c >>> 8);
+    }
+    return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+// stream the CRC-32 of a file without loading it fully into memory
+function crc32File(filePath) {
+    return new Promise((resolve, reject) => {
+        let crc = 0;
+        const s = fs.createReadStream(filePath);
+        s.on('data', chunk => { crc = crc32Update(crc, chunk); });
+        s.on('error', reject);
+        s.on('end', () => resolve(crc));
+    });
+}
+
+// dos time/date for zip headers (ZIP epoch = 1980)
+function dosTimeDate(d = new Date()) {
+    const time = ((d.getHours() & 0x1F) << 11) | ((d.getMinutes() & 0x3F) << 5) | ((d.getSeconds() >> 1) & 0x1F);
+    const date = (((d.getFullYear() - 1980) & 0x7F) << 9) | (((d.getMonth() + 1) & 0xF) << 5) | (d.getDate() & 0x1F);
+    return { time, date };
+}
+
+// Build a STORE-mode zip at zipPath containing files from srcDir.
+// files = array of filenames (relative to srcDir). onProgress(done, total, bytes) optional.
+async function buildZipStore(srcDir, files, zipPath, onProgress) {
+    const out = fs.createWriteStream(zipPath);
+    const writeBuf = (b) => new Promise((res, rej) => { out.write(b, err => err ? rej(err) : res()); });
+    const pipeFile = (p) => new Promise((res, rej) => {
+        const rs = fs.createReadStream(p);
+        rs.on('error', rej);
+        rs.on('end', res);
+        rs.pipe(out, { end: false });
+    });
+
+    const entries = [];          // metadata for central directory
+    let offset = 0;              // running byte offset into zip
+    const { time, date } = dosTimeDate();
+
+    for (let i = 0; i < files.length; i++) {
+        const name = files[i];
+        const filePath = path.join(srcDir, name);
+        const stat = await fsp.stat(filePath);
+        const size = stat.size;
+        const nameBuf = Buffer.from(name, 'utf8');
+        const crc = await crc32File(filePath);
+
+        // local file header (30 bytes + name)
+        const lfh = Buffer.alloc(30);
+        lfh.writeUInt32LE(0x04034b50, 0);       // signature
+        lfh.writeUInt16LE(20, 4);                // version needed
+        lfh.writeUInt16LE(0x0800, 6);            // flags: bit 11 = UTF-8 name
+        lfh.writeUInt16LE(0, 8);                 // method 0 = STORE
+        lfh.writeUInt16LE(time, 10);
+        lfh.writeUInt16LE(date, 12);
+        lfh.writeUInt32LE(crc, 14);
+        lfh.writeUInt32LE(size, 18);             // compressed size == size (STORE)
+        lfh.writeUInt32LE(size, 22);
+        lfh.writeUInt16LE(nameBuf.length, 26);
+        lfh.writeUInt16LE(0, 28);                // extra field length
+
+        await writeBuf(lfh);
+        await writeBuf(nameBuf);
+        const localHeaderOffset = offset;
+        offset += lfh.length + nameBuf.length;
+
+        await pipeFile(filePath);
+        offset += size;
+
+        entries.push({ name: nameBuf, size, crc, time, date, localHeaderOffset });
+        if (onProgress) onProgress(i + 1, files.length, offset);
+    }
+
+    // central directory
+    const cdStart = offset;
+    for (const e of entries) {
+        const cdh = Buffer.alloc(46);
+        cdh.writeUInt32LE(0x02014b50, 0);        // signature
+        cdh.writeUInt16LE(20, 4);                 // version made by
+        cdh.writeUInt16LE(20, 6);                 // version needed
+        cdh.writeUInt16LE(0x0800, 8);             // flags
+        cdh.writeUInt16LE(0, 10);                 // method
+        cdh.writeUInt16LE(e.time, 12);
+        cdh.writeUInt16LE(e.date, 14);
+        cdh.writeUInt32LE(e.crc, 16);
+        cdh.writeUInt32LE(e.size, 20);
+        cdh.writeUInt32LE(e.size, 24);
+        cdh.writeUInt16LE(e.name.length, 28);
+        cdh.writeUInt16LE(0, 30);                 // extra field
+        cdh.writeUInt16LE(0, 32);                 // comment
+        cdh.writeUInt16LE(0, 34);                 // disk #
+        cdh.writeUInt16LE(0, 36);                 // internal attrs
+        cdh.writeUInt32LE(0, 38);                 // external attrs
+        cdh.writeUInt32LE(e.localHeaderOffset, 42);
+
+        await writeBuf(cdh);
+        await writeBuf(e.name);
+        offset += cdh.length + e.name.length;
+    }
+    const cdSize = offset - cdStart;
+
+    // end of central directory
+    const eocd = Buffer.alloc(22);
+    eocd.writeUInt32LE(0x06054b50, 0);
+    eocd.writeUInt16LE(0, 4);                     // disk #
+    eocd.writeUInt16LE(0, 6);                     // disk with CD start
+    eocd.writeUInt16LE(entries.length, 8);        // entries on this disk
+    eocd.writeUInt16LE(entries.length, 10);       // total entries
+    eocd.writeUInt32LE(cdSize, 12);
+    eocd.writeUInt32LE(cdStart, 16);
+    eocd.writeUInt16LE(0, 20);                    // comment length
+    await writeBuf(eocd);
+
+    await new Promise((res, rej) => out.end(err => err ? rej(err) : res()));
+    const finalStat = await fsp.stat(zipPath);
+    return { bytes: finalStat.size, entries: entries.length };
+}
+
 // ── pHash + dedupe helpers ─────────────────────────────────────
 //
 // Strategy:
@@ -598,6 +739,36 @@ async function processJob(jobId, sessionName, sessionDir, videos, threshold, qua
     // cleanup pool
     await fsp.rm(poolDir, { recursive: true, force: true }).catch(() => {});
 
+    // ── PHASE 3 :: zip the keepers ──
+    let zipInfo = null;
+    if (keptFiles.length > 0) {
+        try {
+            emit(jobId, { type: 'phase', phase: 'zip', msg: `phase 3: zipping ${keptFiles.length} frames` });
+            const zipName = `${sessionName}.zip`;
+            const zipPath = path.join(sessionDir, zipName);
+            // emit progress no more often than every ~4%
+            let lastPct = -5;
+            const result = await buildZipStore(sessionDir, keptFiles, zipPath, (done, total, bytes) => {
+                const pct = (done / total) * 100;
+                if (pct - lastPct >= 4 || done === total) {
+                    lastPct = pct;
+                    emit(jobId, {
+                        type: 'progress', phase: 'zip',
+                        pct, done, total, bytes,
+                    });
+                }
+            });
+            zipInfo = { zipName, zipPath, bytes: result.bytes, entries: result.entries };
+            emit(jobId, {
+                type: 'step', phase: 'zip',
+                msg: `zip written :: ${zipName} :: ${result.entries} files :: ${(result.bytes / 1048576).toFixed(1)} MB`,
+            });
+        } catch (err) {
+            // zip failure shouldn't fail the whole job — frames are already on disk
+            emit(jobId, { type: 'err', phase: 'zip', msg: `zip failed (frames are still in folder): ${err.message}` });
+        }
+    }
+
     job.status = 'complete';
     emit(jobId, {
         type: 'complete',
@@ -606,6 +777,8 @@ async function processJob(jobId, sessionName, sessionDir, videos, threshold, qua
         session: sessionName,
         totalRaw: allFrames.length,
         totalKept: keptFiles.length,
+        zipName: zipInfo ? zipInfo.zipName : null,
+        zipBytes: zipInfo ? zipInfo.bytes : null,
     });
 
     setTimeout(() => {

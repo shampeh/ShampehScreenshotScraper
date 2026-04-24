@@ -1960,8 +1960,8 @@ const ov = {
 let ovSession = null;
 // weighted phase progress for ETA
 // phase budgets sum to 100 — tune if your harvests skew one way
-const PHASE_BUDGET = { download: 55, hash: 25, cluster: 20 };
-let ovPhaseState = { download: 0, hash: 0, cluster: 0 };
+const PHASE_BUDGET = { download: 50, hash: 25, cluster: 20, zip: 5 };
+let ovPhaseState = { download: 0, hash: 0, cluster: 0, zip: 0 };
 
 ov.close.onclick = ov.dismiss.onclick = () => {
     ov.root.classList.remove('visible', 'complete', 'failed');
@@ -2651,7 +2651,7 @@ function openOverlay(total) {
     ovSession = null;
     ovFrameTotal = 0;
     ovStart = Date.now();
-    ovPhaseState = { download: 0, hash: 0, cluster: 0 };
+    ovPhaseState = { download: 0, hash: 0, cluster: 0, zip: 0 };
     ov.eta.textContent = '—';
     clearInterval(ovTimer);
     ovTimer = setInterval(() => {
@@ -2662,7 +2662,8 @@ function openOverlay(total) {
         const overall =
             (ovPhaseState.download / 100) * PHASE_BUDGET.download +
             (ovPhaseState.hash     / 100) * PHASE_BUDGET.hash +
-            (ovPhaseState.cluster  / 100) * PHASE_BUDGET.cluster;
+            (ovPhaseState.cluster  / 100) * PHASE_BUDGET.cluster +
+            (ovPhaseState.zip      / 100) * PHASE_BUDGET.zip;
 
         // only show ETA once we have meaningful progress (avoids wild first estimates)
         if (overall > 3 && overall < 99.5 && s > 2) {
@@ -2736,6 +2737,9 @@ function streamProgress(jobId, total) {
                 } else if (m.phase === 'dedupe') {
                     ov.title.textContent = '▶ PHASE 2 :: CLUSTERING';
                     ov.current.textContent = 'all videos pooled';
+                } else if (m.phase === 'zip') {
+                    ov.title.textContent = '▶ PHASE 3 :: ZIPPING';
+                    ov.current.textContent = 'bundling keepers';
                 }
                 ovLog('', `══ ${m.msg} ══`);
                 log('step', m.msg);
@@ -2777,6 +2781,13 @@ function streamProgress(jobId, total) {
                     ovPhaseState.download = 100;
                     ovPhaseState.hash = 100;
                     ovPhaseState.cluster = m.pct;
+                } else if (m.phase === 'zip' && m.pct != null) {
+                    // zip is phase 3 — let the interval tick drive the bar from ovPhaseState
+                    ov.phase.textContent = `zip ${m.pct.toFixed(0)}% (${m.done}/${m.total})`;
+                    ovPhaseState.download = 100;
+                    ovPhaseState.hash = 100;
+                    ovPhaseState.cluster = 100;
+                    ovPhaseState.zip = m.pct;
                 }
                 break;
 
@@ -2838,6 +2849,12 @@ function streamProgress(jobId, total) {
                 if (typeof m.totalKept === 'number') {
                     ov.frames.textContent = m.totalKept;
                     ovLog('ok', `${m.totalRaw} raw → ${m.totalKept} unique scenes`);
+                }
+                // surface zip info if the server produced one
+                if (m.zipName && typeof m.zipBytes === 'number') {
+                    const mb = (m.zipBytes / 1048576).toFixed(1);
+                    ovLog('ok', `📦 ${m.zipName} :: ${mb} MB`);
+                    log('done', `zip: ${m.zipName} (${mb} MB)`);
                 }
                 ovComplete(m.msg);
                 break;

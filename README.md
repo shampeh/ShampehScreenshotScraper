@@ -165,13 +165,15 @@ start at 20, drop lower if you're losing scenes you wanted.
        ├── 0002_7234567891234567890.png
        ├── 0003_7234567891234567899.png
        ├── 0004_7234567891234567899.png
-       └── ...
+       ├── ...
+       └── shampeh.ai - 2026-04-18_22-47-23 - thr20 - png.zip
 ```
 
 - session folder = `[channel] - [datetime] - thr[N] - [quality]`
 - filename = `[global-keep-seq]_[videoid].[ext]`
 - every keeper is unique across ALL selected videos (not just within each)
 - numerical prefix = order of scene-detection, sorts chronologically-ish
+- session `.zip` bundles all keepers for easy share/upload (STORE mode — images are already compressed, so no CPU is wasted re-compressing them)
 
 ---
 
@@ -206,6 +208,9 @@ start at 20, drop lower if you're losing scenes you wanted.
  ║         if ≥ threshold → copy to session/ + emit 'kept' event   ║
  ║         else → drop                                             ║
  ║       delete pool/                                              ║
+ ║     phase 3 :: ZIP                                              ║
+ ║       bundle session/ keepers into session/[name].zip           ║
+ ║       STORE mode (JPEG/PNG bytes stream through, no re-encode)  ║
  ║                                                                 ║
  ╚═════════════════════════════════════════════════════════════════╝
 ```
